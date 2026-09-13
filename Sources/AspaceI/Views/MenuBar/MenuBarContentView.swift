@@ -14,7 +14,7 @@ struct MenuBarContentView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(accountManager.accounts) { account in
-                    Label(account.displayName, systemImage: account.platform.symbolName)
+                    AccountQuotaRow(account: account, compact: true)
                 }
             }
 
@@ -47,7 +47,7 @@ struct MenuBarContentView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
-        .frame(width: 260)
+        .frame(width: 300)
         .padding()
         .onAppear { accountManager.startAutomaticRefresh() }
     }

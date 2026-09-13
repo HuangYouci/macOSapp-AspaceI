@@ -9,16 +9,7 @@ struct AccountListView: View {
     var body: some View {
         NavigationStack {
             List(accountManager.accounts) { account in
-                VStack(alignment: .leading, spacing: 4) {
-                    Label(account.displayName, systemImage: account.platform.symbolName)
-                        .font(.headline)
-                    Text(account.planName ?? String(localized: "PlanUnknown", defaultValue: "方案未知"))
-                        .foregroundStyle(.secondary)
-                    if let error = account.lastError {
-                        Text(error)
-                            .foregroundStyle(.red)
-                    }
-                }
+                AccountQuotaRow(account: account)
                 .padding(.vertical, 4)
                 .contextMenu {
                     Button("設為目前帳號") { accountManager.activate(account) }

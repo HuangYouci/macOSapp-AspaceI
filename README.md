@@ -24,4 +24,13 @@ swift test
 swift run AspaceI
 ```
 
+產生可直接開啟的 App：
+
+```bash
+./scripts/build-app.sh
+open dist/AspaceI.app
+```
+
+建置腳本會進行 ad-hoc codesign，適合本機使用。公開下載若要避免 Gatekeeper 警告，仍需使用 Apple Developer ID 簽署及 notarization。
+
 本專案不會將 token 寫入原始碼、Log、版本控制或一般設定檔。

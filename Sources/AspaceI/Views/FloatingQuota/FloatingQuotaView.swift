@@ -19,20 +19,7 @@ struct FloatingQuotaView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(accountManager.accounts) { account in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(account.displayName, systemImage: account.platform.symbolName)
-                            .font(.subheadline)
-                        if let window = account.quota?.windows.first {
-                            ProgressView(value: Double(window.remainingPercentage), total: 100)
-                            Text("\(window.remainingPercentage)%")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(String(localized: "QuotaUnavailable", defaultValue: "額度尚未取得"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    AccountQuotaRow(account: account, compact: true)
                 }
             }
         }
