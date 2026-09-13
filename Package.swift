@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "AspaceI",
+    defaultLocalization: "zh-Hant",
     platforms: [
         .macOS(.v15)
     ],
@@ -13,6 +14,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AspaceI",
+            resources: [
+                .copy("Resources/Logos"),
+                .process("Resources/Localization")
+            ],
             linkerSettings: [
                 .linkedFramework("Security")
             ]

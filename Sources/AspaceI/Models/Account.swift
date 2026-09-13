@@ -1,6 +1,10 @@
 import Foundation
 
 struct Account: Codable, Identifiable, Equatable, Sendable {
+    enum Origin: String, Codable, Sendable {
+        case local, manual, file, oauth
+    }
+
     let id: UUID
     let platform: PlatformKind
     var displayName: String
@@ -11,6 +15,13 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     var lastError: String?
     var sourcePath: String?
     var isActive: Bool
+    var origin: Origin
+
+    /// 畫面與 menu bar 使用的名稱：有登入身分時取 email 的使用者名稱。
+    var label: String {
+        guard let email, !email.isEmpty else { return displayName }
+        return String(email.split(separator: "@").first ?? Substring(email))
+    }
 
     init(
         id: UUID = UUID(),
@@ -22,7 +33,8 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         quota: QuotaSnapshot? = nil,
         lastError: String? = nil,
         sourcePath: String? = nil,
-        isActive: Bool = false
+        isActive: Bool = false,
+        origin: Origin = .manual
     ) {
         self.id = id
         self.platform = platform
@@ -34,10 +46,11 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         self.lastError = lastError
         self.sourcePath = sourcePath
         self.isActive = isActive
+        self.origin = origin
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, platform, displayName, email, planName, credentialReference, quota, lastError, sourcePath, isActive
+        case id, platform, displayName, email, planName, credentialReference, quota, lastError, sourcePath, isActive, origin
     }
 
     init(from decoder: Decoder) throws {
@@ -52,5 +65,13 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
         sourcePath = try container.decodeIfPresent(String.self, forKey: .sourcePath)
         isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? false
+        origin = try container.decodeIfPresent(Origin.self, forKey: .origin) ?? Self.inferOrigin(sourcePath: sourcePath)
+    }
+
+    static func inferOrigin(sourcePath: String?) -> Origin {
+        guard let sourcePath else { return .local }
+        if sourcePath == "手動加入" { return .manual }
+        let localMarkers = ["macOS Keychain", "GitHub CLI", "/.codex/", "/.claude/", "/gh/hosts.yml", "Antigravity IDE/User/globalStorage/state.vscdb", "/.gemini/jetski-standalone-oauth-token"]
+        return localMarkers.contains { sourcePath.contains($0) } ? .local : .file
     }
 }

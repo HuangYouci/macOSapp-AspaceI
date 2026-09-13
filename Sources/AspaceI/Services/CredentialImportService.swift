@@ -13,16 +13,29 @@ final class CredentialImportService: Sendable {
     static let shared = CredentialImportService()
     private init() {}
 
-    func importAvailable(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> [ImportedCredential] {
+    /// `includeKeychain` 為 false 時只讀檔案；讀其他 App 的 Keychain 項目會跳授權視窗，只在使用者主動偵測時進行。
+    /// 各平台官方客戶端在本機存放登入資料的檔案位置（依優先順序）。
+    static func localFilePaths(for platform: PlatformKind, homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
+        let support = homeDirectory.appending(path: "Library/Application Support", directoryHint: .isDirectory)
+        return switch platform {
+        case .codex: [homeDirectory.appending(path: ".codex/auth.json")]
+        case .claude: [homeDirectory.appending(path: ".claude/.credentials.json")]
+        case .antigravity: [homeDirectory.appending(path: ".gemini/jetski-standalone-oauth-token"), support.appending(path: "Antigravity IDE/User/globalStorage/state.vscdb")]
+        case .githubCopilot: [homeDirectory.appending(path: ".config/gh/hosts.yml")]
+        }
+    }
+
+    func importAvailable(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser, includeKeychain: Bool = true, platforms: Set<PlatformKind> = Set(PlatformKind.allCases)) -> [ImportedCredential] {
         let support = homeDirectory.appending(path: "Library/Application Support", directoryHint: .isDirectory)
         let codexHome = homeDirectory.appending(path: ".codex", directoryHint: .isDirectory)
         let claudeHome = homeDirectory.appending(path: ".claude", directoryHint: .isDirectory)
         let antigravityDatabase = support.appending(path: "Antigravity IDE/User/globalStorage/state.vscdb")
+        let antigravityToken = homeDirectory.appending(path: ".gemini/jetski-standalone-oauth-token")
         return [
-            importedCodex(from: codexHome),
-            importedClaude(from: claudeHome),
-            importedGitHub(homeDirectory: homeDirectory),
-            importedAntigravity(from: antigravityDatabase)
+            platforms.contains(.codex) ? importedCodex(from: codexHome, includeKeychain: includeKeychain) : nil,
+            platforms.contains(.claude) ? importedClaude(from: claudeHome, includeKeychain: includeKeychain) : nil,
+            platforms.contains(.githubCopilot) ? importedGitHub(homeDirectory: homeDirectory) : nil,
+            platforms.contains(.antigravity) ? importedAntigravity(tokenFile: antigravityToken, database: antigravityDatabase) : nil
         ].compactMap { $0 }
     }
 
@@ -30,14 +43,14 @@ final class CredentialImportService: Sendable {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw CredentialImportError.emptyFile }
         let data: Data
-        if let rawData = trimmed.data(using: .utf8),
-           (try? JSONSerialization.jsonObject(with: rawData)) != nil {
+        let rawData = Data(trimmed.utf8)
+        if (try? JSONSerialization.jsonObject(with: rawData)) != nil || (platform == .githubCopilot && trimmed.contains("oauth_token:")) {
             data = rawData
         } else {
-            let key: String
-            switch platform {
-            case .claude: key = "accessToken"
-            case .antigravity, .codex, .githubCopilot: key = "access_token"
+            let key: String = switch platform {
+            case .claude: "accessToken"
+            case .antigravity: trimmed.hasPrefix("1//") ? "refresh_token" : "access_token"
+            case .codex, .githubCopilot: "access_token"
             }
             data = try JSONSerialization.data(withJSONObject: [key: trimmed])
         }
@@ -49,11 +62,12 @@ final class CredentialImportService: Sendable {
         )
     }
 
-    private func importedCodex(from directory: URL) -> ImportedCredential? {
+    private func importedCodex(from directory: URL, includeKeychain: Bool) -> ImportedCredential? {
         let file = directory.appending(path: "auth.json")
         if let data = nonemptyData(at: file) {
             return ImportedCredential(platform: .codex, displayName: PlatformKind.codex.displayName, sourcePath: file.path, data: data)
         }
+        guard includeKeychain else { return nil }
         let canonicalPath = directory.resolvingSymlinksInPath().path
         let digest = SHA256.hash(data: Data(canonicalPath.utf8)).map { String(format: "%02x", $0) }.joined()
         let account = "cli|\(digest.prefix(16))"
@@ -61,8 +75,8 @@ final class CredentialImportService: Sendable {
         return ImportedCredential(platform: .codex, displayName: PlatformKind.codex.displayName, sourcePath: "macOS Keychain", data: data)
     }
 
-    private func importedClaude(from directory: URL) -> ImportedCredential? {
-        if let data = externalKeychainData(service: "Claude Code-credentials", account: NSUserName()) {
+    private func importedClaude(from directory: URL, includeKeychain: Bool) -> ImportedCredential? {
+        if includeKeychain, let data = externalKeychainData(service: "Claude Code-credentials", account: NSUserName()) {
             return ImportedCredential(platform: .claude, displayName: PlatformKind.claude.displayName, sourcePath: "macOS Keychain", data: data)
         }
         let file = directory.appending(path: ".credentials.json")
@@ -79,7 +93,10 @@ final class CredentialImportService: Sendable {
         return ImportedCredential(platform: .githubCopilot, displayName: PlatformKind.githubCopilot.displayName, sourcePath: file.path, data: data)
     }
 
-    private func importedAntigravity(from database: URL) -> ImportedCredential? {
+    private func importedAntigravity(tokenFile: URL, database: URL) -> ImportedCredential? {
+        if let data = nonemptyData(at: tokenFile) {
+            return ImportedCredential(platform: .antigravity, displayName: PlatformKind.antigravity.displayName, sourcePath: tokenFile.path, data: data)
+        }
         guard FileManager.default.fileExists(atPath: database.path) else { return nil }
         guard let value = sqliteValue(
             database: database,
