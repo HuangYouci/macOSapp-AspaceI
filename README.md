@@ -9,6 +9,10 @@ AspaceI 是一款 macOS 本機選單列工具，用於集中查看 AI 開發工�
 - 本機登入狀態唯讀偵測
 - 非敏感帳號資料本機保存
 - 敏感憑證 Keychain 儲存層
+- Codex、Claude 與 GitHub Copilot 額度更新
+- 獨立 profile 的多 Instance 建立、啟動與停止
+
+Antigravity 尚無穩定公開的個人額度介面；AspaceI 會保留登入狀態並顯示不可用，不會偽造額度。
 
 ## 開發
 

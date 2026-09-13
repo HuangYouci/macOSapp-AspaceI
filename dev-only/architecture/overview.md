@@ -9,9 +9,10 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 ## 資料流
 
 1. `LocalAccountDiscoveryService` 唯讀檢查官方客戶端的登入儲存是否存在。
-2. `AccountManager` 協調偵測結果及非敏感資料保存。
-3. 後續各平台 Service 負責驗證憑證與轉換統一的 `QuotaSnapshot`。
-4. `MenuBarContentView` 與 `FloatingQuotaView` 僅接收 `AccountManager` 提供的資料。
+2. `CredentialImportService` 讀取既有憑證後立即交給 `KeychainService`，不輸出內容。
+3. `QuotaService` 在記憶體內取得 token 並轉換各平台回應。
+4. `AccountManager` 協調匯入、額度與非敏感資料保存。
+5. `MenuBarContentView` 與 `FloatingQuotaView` 僅接收 `AccountManager` 提供的資料。
 
 ## 機密資料
 

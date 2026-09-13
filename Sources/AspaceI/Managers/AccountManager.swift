@@ -10,6 +10,9 @@ final class AccountManager {
 
     private let accountStore: AccountStore
     private let discoveryService: LocalAccountDiscoveryService
+    private let importService = CredentialImportService.shared
+    private let keychainService = KeychainService.shared
+    private let quotaService = QuotaService.shared
 
     init(
         accountStore: AccountStore = .shared,
@@ -47,6 +50,40 @@ final class AccountManager {
                     displayName: candidate.platform.displayName
                 )
             )
+        }
+        persistAccounts()
+    }
+
+    func importLocalAccounts() async {
+        isDiscovering = true
+        defer { isDiscovering = false }
+        let imported = await Task.detached(priority: .userInitiated) { [importService] in importService.importAvailable() }.value
+        guard !Task.isCancelled else { return }
+        for item in imported {
+            let existing = accounts.firstIndex { $0.platform == item.platform && $0.sourcePath == item.sourcePath }
+            let id = existing.map { accounts[$0].id } ?? UUID()
+            let reference = item.data.map { _ in "\(item.platform.rawValue).\(id.uuidString)" }
+            do {
+                if let data = item.data, let reference {
+                    try keychainService.save(data, account: reference)
+                }
+                let account = Account(id: id, platform: item.platform, displayName: item.displayName, credentialReference: reference, sourcePath: item.sourcePath)
+                if let existing { accounts[existing] = account } else { accounts.append(account) }
+            } catch { errorMessage = error.localizedDescription }
+        }
+        persistAccounts()
+        await refreshAllQuotas()
+    }
+
+    func refreshAllQuotas() async {
+        for index in accounts.indices {
+            guard !Task.isCancelled else { return }
+            guard let reference = accounts[index].credentialReference else { continue }
+            do {
+                guard let data = try keychainService.load(account: reference) else { throw QuotaError.missingToken }
+                accounts[index].quota = try await quotaService.fetch(for: accounts[index], credentialData: data)
+                accounts[index].lastError = nil
+            } catch { accounts[index].lastError = error.localizedDescription }
         }
         persistAccounts()
     }

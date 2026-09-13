@@ -9,6 +9,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     var credentialReference: String?
     var quota: QuotaSnapshot?
     var lastError: String?
+    var sourcePath: String?
 
     init(
         id: UUID = UUID(),
@@ -18,7 +19,8 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         planName: String? = nil,
         credentialReference: String? = nil,
         quota: QuotaSnapshot? = nil,
-        lastError: String? = nil
+        lastError: String? = nil,
+        sourcePath: String? = nil
     ) {
         self.id = id
         self.platform = platform
@@ -28,5 +30,6 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         self.credentialReference = credentialReference
         self.quota = quota
         self.lastError = lastError
+        self.sourcePath = sourcePath
     }
 }

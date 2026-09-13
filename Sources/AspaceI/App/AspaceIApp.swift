@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct AspaceIApp: App {
     @State private var accountManager = AccountManager()
+    @State private var instanceManager = InstanceManager()
 
     var body: some Scene {
         MenuBarExtra {
@@ -26,5 +27,11 @@ struct AspaceIApp: App {
         .defaultSize(width: 300, height: 240)
         .windowStyle(.plain)
         .windowLevel(.floating)
+
+        WindowGroup("Instances", id: "instances") {
+            NavigationStack { InstanceListView() }
+                .environment(instanceManager)
+        }
+        .defaultSize(width: 620, height: 480)
     }
 }

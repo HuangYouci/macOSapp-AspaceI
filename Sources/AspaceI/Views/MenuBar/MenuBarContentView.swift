@@ -20,10 +20,14 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            Button(String(localized: "DiscoverAccounts", defaultValue: "偵測本機帳號")) {
+            Button(String(localized: "ImportAccounts", defaultValue: "匯入本機帳號")) {
                 Task {
-                    await accountManager.discoverLocalAccounts()
+                    await accountManager.importLocalAccounts()
                 }
+            }
+
+            Button(String(localized: "RefreshQuota", defaultValue: "更新額度")) {
+                Task { await accountManager.refreshAllQuotas() }
             }
             .disabled(accountManager.isDiscovering)
 
@@ -34,6 +38,8 @@ struct MenuBarContentView: View {
             Button(String(localized: "OpenFloatingQuota", defaultValue: "顯示漂浮額度")) {
                 openWindow(id: "floating-quota")
             }
+
+            Button("Instances") { openWindow(id: "instances") }
 
             Divider()
 

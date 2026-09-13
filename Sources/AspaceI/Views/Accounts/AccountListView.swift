@@ -11,6 +11,10 @@ struct AccountListView: View {
                         .font(.headline)
                     Text(account.planName ?? String(localized: "PlanUnknown", defaultValue: "方案未知"))
                         .foregroundStyle(.secondary)
+                    if let error = account.lastError {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
                 }
                 .padding(.vertical, 4)
             }
@@ -24,9 +28,9 @@ struct AccountListView: View {
             }
             .navigationTitle(String(localized: "AccountsTitle", defaultValue: "帳號與額度"))
             .toolbar {
-                Button(String(localized: "DiscoverAccounts", defaultValue: "偵測本機帳號")) {
+                Button(String(localized: "ImportAccounts", defaultValue: "匯入本機帳號")) {
                     Task {
-                        await accountManager.discoverLocalAccounts()
+                        await accountManager.importLocalAccounts()
                     }
                 }
             }

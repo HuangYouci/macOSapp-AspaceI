@@ -1,6 +1,33 @@
+# macOS
 .DS_Store
-/.build
-/.swiftpm
-/DerivedData
+.AppleDouble
+.LSOverride
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# Xcode
+DerivedData/
+build/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
 *.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+# Credentials and local state
+.env
+.env.*
+!.env.example
+*.p12
+*.mobileprovision
+auth.json
+credentials.json
+accounts.json
+Instances/
+
+# Development backups
 dev-only/**/backup/
