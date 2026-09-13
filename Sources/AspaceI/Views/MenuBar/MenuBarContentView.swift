@@ -2,68 +2,72 @@ import SwiftUI
 
 struct MenuBarContentView: View {
     @Environment(AccountManager.self) private var accountManager
-    @Environment(SettingsManager.self) private var settingsManager
-    @Environment(\.openWindow) private var openWindow
+    @State private var selection = Section.quota
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(localized: "AppName", defaultValue: "AspaceI"))
-                .font(.headline)
+        TabView(selection: $selection) {
+            quotaView
+                .tabItem { Label("額度", systemImage: "gauge.with.dots.needle.50percent") }
+                .tag(Section.quota)
 
-            if accountManager.accounts.isEmpty {
-                Text(String(localized: "NoAccounts", defaultValue: "尚未加入帳號"))
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(accountManager.accounts) { account in
-                    AccountQuotaRow(account: account, compact: true)
+            AccountListView()
+                .tabItem { Label("帳號", systemImage: "person.2") }
+                .tag(Section.accounts)
+
+            NavigationStack { InstanceListView() }
+                .tabItem { Label("Instances", systemImage: "square.stack.3d.up") }
+                .tag(Section.instances)
+
+            SettingsView()
+                .tabItem { Label("設定", systemImage: "gearshape") }
+                .tag(Section.settings)
+        }
+        .frame(width: 460, height: 560)
+        .onAppear {
+            accountManager.startAutomaticRefresh()
+        }
+    }
+
+    private var quotaView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("AspaceI")
+                    .font(.headline)
+                Spacer()
+                Button("更新", systemImage: "arrow.clockwise") {
+                    Task { await accountManager.refreshAllQuotas() }
+                }
+                .labelStyle(.iconOnly)
+                .disabled(accountManager.isDiscovering)
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if accountManager.accounts.isEmpty {
+                        ContentUnavailableView("尚未加入帳號", systemImage: "person.crop.circle.badge.questionmark")
+                    } else {
+                        ForEach(accountManager.accounts) { account in
+                            AccountQuotaRow(account: account)
+                        }
+                    }
                 }
             }
 
-            Divider()
-
-            if let error = accountManager.errorMessage {
-                Text(error)
+            if let errorMessage = accountManager.errorMessage {
+                Text(errorMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
             }
-
-            Button(String(localized: "ImportAccounts", defaultValue: "匯入本機帳號")) {
-                Task {
-                    await accountManager.importLocalAccounts()
-                }
-            }
-
-            Button(String(localized: "RefreshQuota", defaultValue: "更新額度")) {
-                Task { await accountManager.refreshAllQuotas() }
-            }
-            .disabled(accountManager.isDiscovering)
-
-            Button(String(localized: "OpenDashboard", defaultValue: "開啟 AspaceI")) {
-                openWindow(id: "dashboard")
-                NSApplication.shared.activate()
-            }
-
-            Button(String(localized: "OpenFloatingQuota", defaultValue: "顯示漂浮額度")) {
-                openWindow(id: "floating-quota")
-                NSApplication.shared.activate()
-            }
-
-            Toggle(
-                String(localized: "LaunchAtLogin", defaultValue: "登入時開啟"),
-                isOn: Binding(
-                    get: { settingsManager.launchAtLogin },
-                    set: { settingsManager.setLaunchAtLogin($0) }
-                )
-            )
-
-            Divider()
-
-            Button(String(localized: "Quit", defaultValue: "結束 AspaceI")) {
-                NSApplication.shared.terminate(nil)
-            }
         }
-        .frame(width: 300)
         .padding()
-        .onAppear { accountManager.startAutomaticRefresh() }
+    }
+}
+
+extension MenuBarContentView {
+    enum Section: Hashable {
+        case quota
+        case accounts
+        case instances
+        case settings
     }
 }

@@ -5,16 +5,45 @@ struct AccountListView: View {
     @Environment(AccountManager.self) private var accountManager
     @State private var importPlatform = PlatformKind.codex
     @State private var showsImporter = false
+    @State private var credentialName = ""
+    @State private var credentialValue = ""
 
     var body: some View {
         NavigationStack {
-            List(accountManager.accounts) { account in
-                AccountQuotaRow(account: account)
-                .padding(.vertical, 4)
-                .contextMenu {
-                    Button("設為目前帳號") { accountManager.activate(account) }
-                    Button("套用至官方客戶端") { accountManager.applyToDefaultClient(account) }
-                    Button("刪除", role: .destructive) { accountManager.remove(account) }
+            List {
+                Section("帳號") {
+                    ForEach(accountManager.accounts) { account in
+                        AccountQuotaRow(account: account)
+                            .padding(.vertical, 4)
+                            .contextMenu {
+                                Button("設為目前帳號") { accountManager.activate(account) }
+                                Button("套用至官方客戶端") { accountManager.applyToDefaultClient(account) }
+                                Button("刪除", role: .destructive) { accountManager.remove(account) }
+                            }
+                    }
+                }
+
+                Section("加入憑證") {
+                    Picker("平台", selection: $importPlatform) {
+                        ForEach(PlatformKind.allCases) { platform in
+                            Text(platform.displayName)
+                                .tag(platform)
+                        }
+                    }
+                    TextField("帳號名稱", text: $credentialName)
+                    SecureField("Token 或 JSON", text: $credentialValue)
+                    Button("加入") {
+                        Task {
+                            await accountManager.addCredential(
+                                platform: importPlatform,
+                                displayName: credentialName,
+                                value: credentialValue
+                            )
+                            credentialName = ""
+                            credentialValue = ""
+                        }
+                    }
+                    .disabled(credentialValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .overlay {
@@ -25,7 +54,7 @@ struct AccountListView: View {
                     )
                 }
             }
-            .navigationTitle(String(localized: "AccountsTitle", defaultValue: "帳號與額度"))
+            .navigationTitle(String(localized: "AccountsTitle", defaultValue: "帳號"))
             .toolbar {
                 Button(String(localized: "ImportAccounts", defaultValue: "匯入本機帳號")) {
                     Task {

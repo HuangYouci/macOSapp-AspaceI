@@ -22,27 +22,15 @@ struct AspaceIApp: App {
         MenuBarExtra {
             MenuBarContentView()
                 .environment(accountManager)
+                .environment(instanceManager)
                 .environment(settingsManager)
         } label: {
             Label(accountManager.menuBarTitle, systemImage: "gauge.with.dots.needle.50percent")
+                .task {
+                    await accountManager.autoImportLocalAccounts()
+                    accountManager.startAutomaticRefresh()
+                }
         }
         .menuBarExtraStyle(.window)
-
-        WindowGroup(String(localized: "MainWindowTitle", defaultValue: "AspaceI"), id: "dashboard") {
-            DashboardView()
-                .environment(accountManager)
-                .environment(instanceManager)
-                .environment(settingsManager)
-        }
-        .defaultSize(width: 760, height: 560)
-
-        WindowGroup(String(localized: "FloatingWindowTitle", defaultValue: "額度"), id: "floating-quota") {
-            FloatingQuotaView()
-                .environment(accountManager)
-        }
-        .defaultSize(width: 300, height: 240)
-        .windowStyle(.plain)
-        .windowLevel(.floating)
-
     }
 }

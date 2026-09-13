@@ -5,10 +5,9 @@ AspaceI 是一款 macOS 本機選單列工具，用於集中查看 AI 開發工�
 ## 目前狀態
 
 - macOS 選單列入口
-- 完整帳號、Instance、設定與關於 GUI
-- 關閉 GUI 後選單列持續運作，不顯示 Dock 圖示
+- 單一 menu bar popup，整合額度、帳號、Instance 與設定
+- 不建立一般主視窗，不顯示 Dock 圖示
 - 可選擇登入 macOS 時自動開啟
-- 可置頂的漂浮額度視窗
 - 本機登入狀態唯讀偵測
 - 非敏感帳號資料本機保存
 - 敏感憑證 Keychain 儲存層
@@ -48,7 +47,7 @@ open dist/AspaceI.app
 ## 使用方式
 
 1. 從選單列開啟 AspaceI，選擇「匯入本機帳號」。
-2. Codex 讀取 `~/.codex/auth.json`；GitHub 透過官方 `gh auth token` 讀取 Keychain；Claude 讀取 Claude Code credentials；Antigravity 偵測其 `state.vscdb`。
+2. Codex 讀取 `~/.codex/auth.json` 或官方 Keychain；GitHub 透過官方 `gh auth token` 讀取 Keychain；Claude 讀取 Claude Code Keychain 或 credentials 檔；Antigravity 讀取 `state.vscdb` 內的 refresh token。
 3. 其他帳號可在「帳號與額度」選擇「從檔案加入」。敏感 JSON／YAML 會立即存入 AspaceI Keychain。
 4. 「設為目前帳號」只改 AspaceI 顯示；「套用至官方客戶端」會寫入官方預設 profile，操作前請關閉該客戶端。
 5. 建立 Instance 時選擇平台、帳號與官方可執行檔。每個 Instance 使用獨立 profile。

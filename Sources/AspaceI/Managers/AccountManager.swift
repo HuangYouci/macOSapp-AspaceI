@@ -8,6 +8,7 @@ final class AccountManager {
     private(set) var isDiscovering = false
     var errorMessage: String?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var didAutoImport = false
 
     private let accountStore: AccountStore
     private let discoveryService: LocalAccountDiscoveryService
@@ -77,6 +78,12 @@ final class AccountManager {
         await refreshAllQuotas()
     }
 
+    func autoImportLocalAccounts() async {
+        guard !didAutoImport else { return }
+        didAutoImport = true
+        await importLocalAccounts()
+    }
+
     func importFile(at url: URL, platform: PlatformKind) async {
         do {
             let item = try importService.importFile(at: url, platform: platform)
@@ -87,6 +94,36 @@ final class AccountManager {
             persistAccounts()
             await refreshAllQuotas()
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    func addCredential(platform: PlatformKind, displayName: String, value: String) async {
+        do {
+            let item = try importService.importText(
+                value,
+                platform: platform,
+                displayName: displayName
+            )
+            let id = UUID()
+            let reference = "\(platform.rawValue).\(id.uuidString)"
+            guard let data = item.data else { throw CredentialImportError.emptyFile }
+            try keychainService.save(data, account: reference)
+            let resolvedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            accounts.append(
+                Account(
+                    id: id,
+                    platform: platform,
+                    displayName: resolvedName.isEmpty ? platform.displayName : resolvedName,
+                    credentialReference: reference,
+                    sourcePath: item.sourcePath,
+                    isActive: !accounts.contains { $0.platform == platform && $0.isActive }
+                )
+            )
+            errorMessage = nil
+            persistAccounts()
+            await refreshAllQuotas()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func activate(_ account: Account) {
