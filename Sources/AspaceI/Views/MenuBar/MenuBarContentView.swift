@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarContentView: View {
     @Environment(AccountManager.self) private var accountManager
+    @Environment(SettingsManager.self) private var settingsManager
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -37,15 +38,23 @@ struct MenuBarContentView: View {
             }
             .disabled(accountManager.isDiscovering)
 
-            Button(String(localized: "OpenAccounts", defaultValue: "帳號與額度")) {
-                openWindow(id: "accounts")
+            Button(String(localized: "OpenDashboard", defaultValue: "開啟 AspaceI")) {
+                openWindow(id: "dashboard")
+                NSApplication.shared.activate()
             }
 
             Button(String(localized: "OpenFloatingQuota", defaultValue: "顯示漂浮額度")) {
                 openWindow(id: "floating-quota")
+                NSApplication.shared.activate()
             }
 
-            Button("Instances") { openWindow(id: "instances") }
+            Toggle(
+                String(localized: "LaunchAtLogin", defaultValue: "登入時開啟"),
+                isOn: Binding(
+                    get: { settingsManager.launchAtLogin },
+                    set: { settingsManager.setLaunchAtLogin($0) }
+                )
+            )
 
             Divider()
 

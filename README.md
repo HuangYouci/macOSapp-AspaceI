@@ -1,16 +1,26 @@
 # AspaceI
 
-AspaceI 是一款 macOS 本機選單列工具，用於集中查看 AI 開發工具帳號、額度與重置時間，並逐步支援多帳號及多 Instance。
+AspaceI 是一款 macOS 本機選單列工具，用於集中查看 AI 開發工具帳號、額度與重置時間，並支援多帳號及多 Instance。
 
 ## 目前狀態
 
 - macOS 選單列入口
+- 完整帳號、Instance、設定與關於 GUI
+- 關閉 GUI 後選單列持續運作，不顯示 Dock 圖示
+- 可選擇登入 macOS 時自動開啟
 - 可置頂的漂浮額度視窗
 - 本機登入狀態唯讀偵測
 - 非敏感帳號資料本機保存
 - 敏感憑證 Keychain 儲存層
 - Codex、Claude 與 GitHub API 額度更新
 - 獨立 profile 的多 Instance 建立、啟動與停止
+
+目前版本：26.9.13
+
+作者：Huang Youci
+
+- [隱私政策](https://huangyouci.com/privacy)
+- [使用條款](https://huangyouci.com/terms)
 
 Antigravity 的 `state.vscdb` 可用於隔離 Instance；額度更新需另外匯入包含 `access_token` 的帳號 JSON。其 Cloud Code 個人額度介面不是穩定公開契約，若官方改版可能需要同步更新。
 

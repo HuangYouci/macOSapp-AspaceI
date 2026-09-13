@@ -2,7 +2,7 @@
 
 最後更新日期：2026-09-13
 
-對應功能／commit：AspaceI 0.1.0 本機 MVP
+對應功能／commit：AspaceI 26.9.13 GUI 與常駐模式
 
 ## 邊界
 
@@ -17,6 +17,14 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 5. `MenuBarContentView` 與 `FloatingQuotaView` 僅接收 `AccountManager` 提供的資料。
 
 額度每五分鐘在背景更新；失敗時保留最後一次成功快取並於帳號列顯示狀態。
+
+## App 生命週期與 GUI
+
+- App 採 accessory activation policy，不顯示 Dock 圖示。
+- 關閉主視窗只關閉 GUI，選單列與背景額度更新持續運作。
+- 使用者只能從選單列的「結束 AspaceI」真正終止 App。
+- 主 GUI 統整帳號、Instance、設定與關於頁；選單列保留快速額度與常用動作。
+- 登入時開啟採用系統 `SMAppService.mainApp`，不自行維護 LaunchAgent。
 
 ## 機密資料
 
