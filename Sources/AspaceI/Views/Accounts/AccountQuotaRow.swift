@@ -5,10 +5,16 @@ struct AccountQuotaRow: View {
     var compact = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(account.displayName, systemImage: account.platform.symbolName)
-                    .font(.subheadline.weight(.medium))
+                Text(account.platform.initials)
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(account.platform.tint)
+                    .background(account.platform.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+
+                Text(account.displayName)
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 if account.isActive {
                     Text("目前")
@@ -18,20 +24,30 @@ struct AccountQuotaRow: View {
             }
 
             if let windows = account.quota?.windows, !windows.isEmpty {
-                ForEach(compact ? Array(windows.prefix(2)) : windows) { window in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
+                HStack(spacing: 18) {
+                    ForEach(compact ? Array(windows.prefix(2)) : windows) { window in
+                        VStack(spacing: 5) {
+                            ZStack {
+                                Circle()
+                                    .stroke(.quaternary, lineWidth: 5)
+                                Circle()
+                                    .trim(from: 0, to: Double(window.remainingPercentage) / 100)
+                                    .stroke(account.platform.tint, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                                    .rotationEffect(.degrees(-90))
+                                Text("\(window.remainingPercentage)%")
+                                    .font(.caption.weight(.semibold))
+                                    .monospacedDigit()
+                            }
+                            .frame(width: 52, height: 52)
+
                             Text(window.title)
-                            Spacer()
-                            Text("\(window.remainingPercentage)%")
-                                .monospacedDigit()
-                        }
-                        .font(.caption)
-                        ProgressView(value: Double(window.remainingPercentage), total: 100)
-                        if let resetsAt = window.resetsAt {
-                            Text(resetsAt, style: .relative)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                            if let resetsAt = window.resetsAt {
+                                Text(resetsAt, style: .relative)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
                 }
@@ -46,6 +62,28 @@ struct AccountQuotaRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+extension PlatformKind {
+    var initials: String {
+        switch self {
+        case .antigravity: "AG"
+        case .codex: "CX"
+        case .claude: "CL"
+        case .githubCopilot: "GH"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .antigravity: .purple
+        case .codex: .blue
+        case .claude: .orange
+        case .githubCopilot: .cyan
         }
     }
 }

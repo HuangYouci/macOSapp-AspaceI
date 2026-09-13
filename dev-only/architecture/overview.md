@@ -23,6 +23,7 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 - App 採 accessory activation policy，不顯示 Dock 圖示。
 - App 只有 menu bar popup，不建立一般主視窗或漂浮視窗。
 - Popup 統整額度、帳號、Instance、設定與關於資訊。
+- Popup 採 460 × 560 固定工作區、頂部分段導覽、平台色額度卡片與半透明材質；各分頁仍共用正式資料元件。
 - 使用者只能從 popup 的「結束 AspaceI」真正終止 App。
 - 登入時開啟採用系統 `SMAppService.mainApp`，不自行維護 LaunchAgent。
 

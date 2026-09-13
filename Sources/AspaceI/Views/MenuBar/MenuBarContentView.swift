@@ -5,24 +5,33 @@ struct MenuBarContentView: View {
     @State private var selection = Section.quota
 
     var body: some View {
-        TabView(selection: $selection) {
-            quotaView
-                .tabItem { Label("額度", systemImage: "gauge.with.dots.needle.50percent") }
-                .tag(Section.quota)
+        VStack(spacing: 14) {
+            HStack(spacing: 4) {
+                tabButton(.quota)
+                tabButton(.accounts)
+                tabButton(.instances)
+                tabButton(.settings)
+            }
+            .padding(3)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
 
-            AccountListView()
-                .tabItem { Label("帳號", systemImage: "person.2") }
-                .tag(Section.accounts)
-
-            NavigationStack { InstanceListView() }
-                .tabItem { Label("Instances", systemImage: "square.stack.3d.up") }
-                .tag(Section.instances)
-
-            SettingsView()
-                .tabItem { Label("設定", systemImage: "gearshape") }
-                .tag(Section.settings)
+            Group {
+                switch selection {
+                case .quota:
+                    quotaView
+                case .accounts:
+                    AccountListView()
+                case .instances:
+                    NavigationStack { InstanceListView() }
+                case .settings:
+                    SettingsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 460, height: 560)
+        .padding(16)
+        .background(.ultraThinMaterial)
         .onAppear {
             accountManager.startAutomaticRefresh()
         }
@@ -59,7 +68,26 @@ struct MenuBarContentView: View {
                     .foregroundStyle(.red)
             }
         }
-        .padding()
+    }
+
+    private func tabButton(_ section: Section) -> some View {
+        Button {
+            selection = section
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: section.symbolName)
+                Text(section.title)
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .foregroundStyle(selection == section ? .primary : .secondary)
+            .background(
+                selection == section ? AnyShapeStyle(.background) : AnyShapeStyle(.clear),
+                in: RoundedRectangle(cornerRadius: 7)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -69,5 +97,23 @@ extension MenuBarContentView {
         case accounts
         case instances
         case settings
+
+        var title: String {
+            switch self {
+            case .quota: "額度"
+            case .accounts: "帳號"
+            case .instances: "Instances"
+            case .settings: "設定"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .quota: "gauge.with.dots.needle.50percent"
+            case .accounts: "person.2"
+            case .instances: "square.stack.3d.up"
+            case .settings: "gearshape"
+            }
+        }
     }
 }
