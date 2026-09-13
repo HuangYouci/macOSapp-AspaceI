@@ -1,8 +1,8 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-09-13
+最後更新日期：2026-09-14
 
-對應功能／commit：AspaceI 26.9.13 帳號切換（預設實例）、刪除確認、Codex 方案 5x/20x
+對應功能／commit：AspaceI 26.9.13 帳號切換（預設實例）、刪除確認、Codex 方案 5x/20x；多實例啟動修正（四平台實測）
 
 ## 邊界
 
@@ -97,12 +97,17 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 實例一律是桌面 App，依服務分組：VS Code（GitHub Copilot）、Antigravity、Claude、Codex。App 由 `ExecutableLocatorService` 在 `/Applications` 與 `~/Applications` 尋找；未安裝時整組停用。
 
 - 每組第一個是「預設」實例：不存檔、不可刪除，id 依平台固定。以 `open -a` 開啟系統原本的 App 設定。
-- 其他實例以 `open -n -a <App> --args --user-data-dir <資料夾>` 開新程序；Codex 另以 `--env CODEX_HOME=<資料夾>` 並把 App 資料放在 `<資料夾>/app-data`，Claude 另設 `CLAUDE_USER_DATA_DIR`（沿用 cockpit-tools 的作法）。
-- 執行狀態以 `ps` 比對：主執行檔位於 App 的 `Contents/MacOS/`，預設實例是沒有 `--user-data-dir` 的那個，其他以資料夾比對；停止送 SIGTERM。
+- 其他實例以 `open -n -a <App> --args --user-data-dir=<資料夾>` 開新程序（2026-09-14 四平台實測）：
+  - 必須用等號形式；Claude 會忽略空格分開的寫法，改用預設資料夾。
+  - Codex（ChatGPT.app）另以 `--env CODEX_HOME=<資料夾>`、`--env CODEX_ELECTRON_USER_DATA_PATH=<資料夾>/app-data`；新版只認這個環境變數，沒設的話第二個程序會被單一實例鎖直接結束。
+  - Claude 正式版會刪掉 `CLAUDE_USER_DATA_DIR`，不再傳。
+  - 實例資料夾名稱取 UUID 前 8 碼：VS Code 在資料夾內建立 IPC socket，完整 UUID 會超過 macOS 104 字元的 socket 路徑上限而啟動即結束。舊實例沿用已存的路徑。
+  - `open` 會把呼叫端的環境變數轉交給 App，啟動時濾掉 `DYLD_*`。
+- 執行狀態以 `ps` 比對：主執行檔位於 `<App 名稱>.app/Contents/MacOS/`（只比對 App 名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行），預設實例是沒有 `--user-data-dir` 的那個，其他以資料夾比對（等號與空格兩種寫法都認）；停止送 SIGTERM。
 - 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 與 VS Code 的登入存在各自加密的儲存區，不提供綁定，實例內自行登入一次。
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。
 
-刪除 Instance 時只允許處理 `Application Support/AspaceI/Instances/` 的直接子目錄，並移至垃圾桶以保留復原能力；外部路徑一律拒絕。
+刪除 Instance 時先送 SIGTERM 並等主程序結束（最多 10 秒，逾時則不刪），否則還在跑的 App 會把資料夾寫回來。只允許處理 `Application Support/AspaceI/Instances/` 的直接子目錄，並移至垃圾桶以保留復原能力；外部路徑一律拒絕。
 
 ### 切換帳號
 

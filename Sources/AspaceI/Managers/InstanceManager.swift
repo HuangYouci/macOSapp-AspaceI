@@ -178,10 +178,11 @@ final class InstanceManager {
         runningProcessIDs = result
     }
 
-    func remove(_ instance: Instance) {
+    /// 先等實例程序真的結束再把資料夾移到垃圾桶，否則還在跑的 App 會把資料夾寫回來。
+    func remove(_ instance: Instance) async {
         guard !isDefault(instance) else { return }
-        stop(instance)
         do {
+            try await quit(instance)
             try service.trashProfile(for: instance)
             instances.removeAll { $0.id == instance.id }
             persist()

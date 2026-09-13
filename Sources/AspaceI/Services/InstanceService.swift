@@ -36,6 +36,10 @@ final class InstanceService: Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = Self.openArguments(for: instance, isDefault: isDefault)
+        // open 會把自己的環境變數轉交給 App；DYLD_* 會讓 VS Code 啟動即結束。
+        process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("DYLD_") }
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw InstanceError.launchFailed }
@@ -43,21 +47,19 @@ final class InstanceService: Sendable {
 
     static func openArguments(for instance: Instance, isDefault: Bool) -> [String] {
         guard !isDefault else { return ["-a", instance.executablePath] + (instance.arguments.isEmpty ? [] : ["--args"] + instance.arguments) }
-        let profile = instance.profileDirectory
+        let userDataDirectory = userDataDirectory(for: instance)
         var arguments = ["-n"]
-        var appArguments: [String]
-        switch instance.platform {
-        case .codex:
-            arguments += ["--env", "CODEX_HOME=\(profile)"]
-            appArguments = ["--user-data-dir", "\(profile)/app-data"]
-        case .claude:
-            arguments += ["--env", "CLAUDE_USER_DATA_DIR=\(profile)"]
-            appArguments = ["--user-data-dir", profile]
-        case .antigravity, .githubCopilot:
-            appArguments = ["--user-data-dir", profile]
+        if instance.platform == .codex {
+            // 新版 ChatGPT.app 只認這個環境變數決定資料夾；沒設的話第二個程序會被單一實例鎖直接結束。
+            arguments += ["--env", "CODEX_HOME=\(instance.profileDirectory)", "--env", "CODEX_ELECTRON_USER_DATA_PATH=\(userDataDirectory)"]
         }
-        appArguments += instance.arguments
+        // 必須用等號形式：Claude 會忽略空格分開的寫法，改用預設資料夾。
+        let appArguments = ["--user-data-dir=\(userDataDirectory)"] + instance.arguments
         return arguments + ["-a", instance.executablePath, "--args"] + appArguments
+    }
+
+    static func userDataDirectory(for instance: Instance) -> String {
+        instance.platform == .codex ? "\(instance.profileDirectory)/app-data" : instance.profileDirectory
     }
 
     func runningProcessIDs() -> [Int32: String] {
@@ -88,14 +90,19 @@ final class InstanceService: Sendable {
     }
 
     /// 找出屬於該實例的主程序：主執行檔在 App 的 Contents/MacOS 下，並以 user-data-dir 區分實例。
+    /// 只比對 App 名稱而非完整路徑，因為隔離中的 App 會從 AppTranslocation 的暫存路徑執行。
     static func mainProcessIDs(for instance: Instance, isDefault: Bool, in processes: [Int32: String]) -> [Int32] {
-        let executablePrefix = "\(instance.executablePath)/Contents/MacOS/"
-        let marker = "--user-data-dir \(instance.platform == .codex ? "\(instance.profileDirectory)/app-data" : instance.profileDirectory)"
+        let executableMarker = "/\(URL(fileURLWithPath: instance.executablePath).lastPathComponent)/Contents/MacOS/"
+        let directory = userDataDirectory(for: instance)
         return processes.compactMap { pid, command in
-            guard command.hasPrefix(executablePrefix) else { return nil }
+            guard command.contains(executableMarker) else { return nil }
             let hasUserDataDir = command.contains("--user-data-dir")
             if isDefault { return hasUserDataDir ? nil : pid }
-            return command.contains(marker) ? pid : nil
+            let matches = ["--user-data-dir=\(directory)", "--user-data-dir \(directory)"].contains { marker in
+                guard let found = command.range(of: marker) else { return false }
+                return found.upperBound == command.endIndex || command[found.upperBound] == " "
+            }
+            return matches ? pid : nil
         }
         .sorted()
     }
@@ -115,8 +122,15 @@ final class InstanceService: Sendable {
         try FileManager.default.trashItem(at: profile, resultingItemURL: &result)
     }
 
+    /// 資料夾名稱取 UUID 前 8 碼：VS Code 會在資料夾內建立 IPC socket，完整 UUID 會超過 macOS 104 字元的 socket 路徑上限而啟動失敗。
     func profileDirectory(for id: UUID) throws -> String {
-        try instancesRootURL().appending(path: id.uuidString, directoryHint: .isDirectory).path
+        let root = try instancesRootURL()
+        let hex = id.uuidString.replacingOccurrences(of: "-", with: "")
+        for length in stride(from: 8, through: hex.count, by: 4) {
+            let candidate = root.appending(path: String(hex.prefix(length)), directoryHint: .isDirectory)
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate.path }
+        }
+        return root.appending(path: id.uuidString, directoryHint: .isDirectory).path
     }
 
     private func storeURL() throws -> URL {

@@ -28,7 +28,7 @@ dist/
 auth.json
 credentials.json
 accounts.json
-Instances/
+/Instances/
 
 # Development backups
 dev-only/**/backup/
