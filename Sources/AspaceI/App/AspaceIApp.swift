@@ -31,6 +31,7 @@ struct AspaceIApp: App {
         WindowGroup("Instances", id: "instances") {
             NavigationStack { InstanceListView() }
                 .environment(instanceManager)
+                .environment(accountManager)
         }
         .defaultSize(width: 620, height: 480)
     }

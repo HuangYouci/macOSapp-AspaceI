@@ -12,15 +12,21 @@ final class InstanceManager {
         do { instances = try service.load() } catch { errorMessage = error.localizedDescription }
     }
 
-    func add(name: String, platform: PlatformKind, executablePath: String) {
+    func add(name: String, platform: PlatformKind, accountID: UUID?, executablePath: String) {
         let id = UUID()
         let root = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Application Support/AspaceI/Instances/\(id.uuidString)")
-        instances.append(Instance(id: id, name: name, platform: platform, profileDirectory: root.path, executablePath: executablePath))
+        instances.append(Instance(id: id, name: name, platform: platform, accountID: accountID, profileDirectory: root.path, executablePath: executablePath))
         persist()
     }
 
-    func launch(_ instance: Instance) {
-        do { try service.launch(instance) } catch { errorMessage = error.localizedDescription }
+    func launch(_ instance: Instance, accounts: AccountManager) {
+        do {
+            if let accountID = instance.accountID, let account = accounts.accounts.first(where: { $0.id == accountID }) {
+                let data = try accounts.credentialData(for: accountID)
+                try CredentialProjectionService.shared.project(account: account, credentialData: data, to: URL(fileURLWithPath: instance.profileDirectory))
+            }
+            try service.launch(instance)
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func stop(_ instance: Instance) { service.stop(id: instance.id) }

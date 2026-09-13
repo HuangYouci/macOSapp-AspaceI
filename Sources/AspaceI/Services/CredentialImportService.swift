@@ -28,4 +28,15 @@ final class CredentialImportService: Sendable {
             return ImportedCredential(platform: platform, displayName: platform.displayName, sourcePath: url.path, data: data)
         }
     }
+
+    func importFile(at url: URL, platform: PlatformKind) throws -> ImportedCredential {
+        let data: Data? = platform == .antigravity ? nil : try Data(contentsOf: url)
+        if platform != .antigravity, data?.isEmpty != false { throw CredentialImportError.emptyFile }
+        return ImportedCredential(platform: platform, displayName: platform.displayName, sourcePath: url.path, data: data)
+    }
+}
+
+enum CredentialImportError: LocalizedError {
+    case emptyFile
+    var errorDescription: String? { "選擇的憑證檔案是空的" }
 }

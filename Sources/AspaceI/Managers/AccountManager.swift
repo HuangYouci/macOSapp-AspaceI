@@ -7,6 +7,7 @@ final class AccountManager {
     private(set) var accounts: [Account] = []
     private(set) var isDiscovering = false
     var errorMessage: String?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
     private let accountStore: AccountStore
     private let discoveryService: LocalAccountDiscoveryService
@@ -67,12 +68,42 @@ final class AccountManager {
                 if let data = item.data, let reference {
                     try keychainService.save(data, account: reference)
                 }
-                let account = Account(id: id, platform: item.platform, displayName: item.displayName, credentialReference: reference, sourcePath: item.sourcePath)
+                let wasActive = existing.map { accounts[$0].isActive } ?? !accounts.contains { $0.platform == item.platform && $0.isActive }
+                let account = Account(id: id, platform: item.platform, displayName: item.displayName, credentialReference: reference, sourcePath: item.sourcePath, isActive: wasActive)
                 if let existing { accounts[existing] = account } else { accounts.append(account) }
             } catch { errorMessage = error.localizedDescription }
         }
         persistAccounts()
         await refreshAllQuotas()
+    }
+
+    func importFile(at url: URL, platform: PlatformKind) async {
+        do {
+            let item = try importService.importFile(at: url, platform: platform)
+            let id = UUID()
+            let reference = item.data.map { _ in "\(platform.rawValue).\(id.uuidString)" }
+            if let data = item.data, let reference { try keychainService.save(data, account: reference) }
+            accounts.append(Account(id: id, platform: platform, displayName: "\(platform.displayName) \(accounts.filter { $0.platform == platform }.count + 1)", credentialReference: reference, sourcePath: item.sourcePath, isActive: !accounts.contains { $0.platform == platform && $0.isActive }))
+            persistAccounts()
+            await refreshAllQuotas()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func activate(_ account: Account) {
+        for index in accounts.indices where accounts[index].platform == account.platform { accounts[index].isActive = accounts[index].id == account.id }
+        persistAccounts()
+    }
+
+    func remove(_ account: Account) {
+        if let reference = account.credentialReference { try? keychainService.delete(account: reference) }
+        accounts.removeAll { $0.id == account.id }
+        if !accounts.contains(where: { $0.platform == account.platform && $0.isActive }), let index = accounts.firstIndex(where: { $0.platform == account.platform }) { accounts[index].isActive = true }
+        persistAccounts()
+    }
+
+    func credentialData(for accountID: UUID) throws -> Data? {
+        guard let account = accounts.first(where: { $0.id == accountID }), let reference = account.credentialReference else { return nil }
+        return try keychainService.load(account: reference)
     }
 
     func refreshAllQuotas() async {
@@ -86,6 +117,21 @@ final class AccountManager {
             } catch { accounts[index].lastError = error.localizedDescription }
         }
         persistAccounts()
+    }
+
+    func startAutomaticRefresh() {
+        guard refreshTask == nil else { return }
+        refreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(300))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await self?.refreshAllQuotas()
+            }
+        }
     }
 
     private func loadAccounts() {

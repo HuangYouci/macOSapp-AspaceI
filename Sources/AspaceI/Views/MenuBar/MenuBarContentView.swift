@@ -49,5 +49,6 @@ struct MenuBarContentView: View {
         }
         .frame(width: 260)
         .padding()
+        .onAppear { accountManager.startAutomaticRefresh() }
     }
 }

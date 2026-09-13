@@ -14,6 +14,8 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 4. `AccountManager` 協調匯入、額度與非敏感資料保存。
 5. `MenuBarContentView` 與 `FloatingQuotaView` 僅接收 `AccountManager` 提供的資料。
 
+額度每五分鐘在背景更新；失敗時保留最後一次成功快取並於帳號列顯示狀態。
+
 ## 機密資料
 
 - Token 與 refresh token 只存入 macOS Keychain。
@@ -22,4 +24,4 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 
 ## 多 Instance
 
-後續每個 Instance 使用獨立 profile 目錄。啟動前才將指定帳號憑證投影至該 profile，運作期間禁止背景覆寫，並使用跨程序鎖避免 token rotation 競爭。
+每個 Instance 使用獨立 profile 目錄。啟動前才將指定帳號憑證投影至該 profile，運作期間不做背景覆寫。Codex 與 Claude 使用環境變數隔離；Antigravity 與 GitHub Copilot 使用獨立 user-data 目錄。

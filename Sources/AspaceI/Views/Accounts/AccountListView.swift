@@ -1,7 +1,10 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AccountListView: View {
     @Environment(AccountManager.self) private var accountManager
+    @State private var importPlatform = PlatformKind.codex
+    @State private var showsImporter = false
 
     var body: some View {
         NavigationStack {
@@ -17,6 +20,10 @@ struct AccountListView: View {
                     }
                 }
                 .padding(.vertical, 4)
+                .contextMenu {
+                    Button("設為目前帳號") { accountManager.activate(account) }
+                    Button("刪除", role: .destructive) { accountManager.remove(account) }
+                }
             }
             .overlay {
                 if accountManager.accounts.isEmpty {
@@ -33,6 +40,18 @@ struct AccountListView: View {
                         await accountManager.importLocalAccounts()
                     }
                 }
+                Menu("從檔案加入") {
+                    ForEach(PlatformKind.allCases) { platform in
+                        Button(platform.displayName) {
+                            importPlatform = platform
+                            showsImporter = true
+                        }
+                    }
+                }
+            }
+            .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.data, .json, .yaml], allowsMultipleSelection: false) { result in
+                guard case .success(let urls) = result, let url = urls.first else { return }
+                Task { await accountManager.importFile(at: url, platform: importPlatform) }
             }
         }
     }
