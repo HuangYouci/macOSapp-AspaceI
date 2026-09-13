@@ -20,6 +20,12 @@ struct MenuBarContentView: View {
 
             Divider()
 
+            if let error = accountManager.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
             Button(String(localized: "ImportAccounts", defaultValue: "匯入本機帳號")) {
                 Task {
                     await accountManager.importLocalAccounts()

@@ -13,6 +13,7 @@ struct AccountListView: View {
                 .padding(.vertical, 4)
                 .contextMenu {
                     Button("設為目前帳號") { accountManager.activate(account) }
+                    Button("套用至官方客戶端") { accountManager.applyToDefaultClient(account) }
                     Button("刪除", role: .destructive) { accountManager.remove(account) }
                 }
             }

@@ -12,17 +12,29 @@ final class CredentialProjectionService: Sendable {
         case .claude:
             try write(credentialData, to: profileDirectory.appending(path: ".credentials.json"))
         case .githubCopilot:
-            let directory = profileDirectory.appending(path: ".config/gh", directoryHint: .isDirectory)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try write(credentialData, to: directory.appending(path: "hosts.yml"))
+            return
         case .antigravity:
             guard let sourcePath = account.sourcePath, FileManager.default.fileExists(atPath: sourcePath) else { throw CredentialProjectionError.sourceMissing }
+            guard URL(fileURLWithPath: sourcePath).pathExtension.lowercased() == "vscdb" else { throw CredentialProjectionError.antigravityProfileRequired }
             let directory = profileDirectory.appending(path: "User/globalStorage", directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let target = directory.appending(path: "state.vscdb")
+            if URL(fileURLWithPath: sourcePath).standardizedFileURL == target.standardizedFileURL { return }
             if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
             try FileManager.default.copyItem(at: URL(fileURLWithPath: sourcePath), to: target)
         }
+    }
+
+    func projectToDefaultClient(account: Account, credentialData: Data?, homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) throws {
+        let support = homeDirectory.appending(path: "Library/Application Support", directoryHint: .isDirectory)
+        let profile: URL
+        switch account.platform {
+        case .codex: profile = homeDirectory.appending(path: ".codex", directoryHint: .isDirectory)
+        case .claude: profile = homeDirectory.appending(path: ".claude", directoryHint: .isDirectory)
+        case .githubCopilot: throw CredentialProjectionError.githubUsesInstanceToken
+        case .antigravity: profile = support.appending(path: "Antigravity IDE", directoryHint: .isDirectory)
+        }
+        try project(account: account, credentialData: credentialData, to: profile)
     }
 
     private func write(_ data: Data?, to url: URL) throws {
@@ -33,11 +45,13 @@ final class CredentialProjectionService: Sendable {
 }
 
 enum CredentialProjectionError: LocalizedError {
-    case credentialMissing, sourceMissing
+    case credentialMissing, sourceMissing, antigravityProfileRequired, githubUsesInstanceToken
     var errorDescription: String? {
         switch self {
         case .credentialMissing: "Keychain 中找不到此帳號的憑證"
         case .sourceMissing: "原始登入資料已不存在"
+        case .antigravityProfileRequired: "Antigravity Instance 需綁定 state.vscdb 帳號快照"
+        case .githubUsesInstanceToken: "GitHub 帳號切換請透過綁定 Instance 使用，避免覆蓋系統 Keychain"
         }
     }
 }

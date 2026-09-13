@@ -17,7 +17,7 @@ enum PlatformKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .claude:
             String(localized: "PlatformClaude", defaultValue: "Claude")
         case .githubCopilot:
-            String(localized: "PlatformGitHubCopilot", defaultValue: "GitHub Copilot")
+            String(localized: "PlatformGitHub", defaultValue: "GitHub")
         }
     }
 

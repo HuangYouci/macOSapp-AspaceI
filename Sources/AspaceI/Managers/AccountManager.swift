@@ -94,8 +94,23 @@ final class AccountManager {
         persistAccounts()
     }
 
+    func applyToDefaultClient(_ account: Account) {
+        do {
+            let data = try account.credentialReference.flatMap { try keychainService.load(account: $0) }
+            try CredentialProjectionService.shared.projectToDefaultClient(account: account, credentialData: data)
+            activate(account)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func remove(_ account: Account) {
-        if let reference = account.credentialReference { try? keychainService.delete(account: reference) }
+        if let reference = account.credentialReference {
+            do {
+                try keychainService.delete(account: reference)
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
         accounts.removeAll { $0.id == account.id }
         if !accounts.contains(where: { $0.platform == account.platform && $0.isActive }), let index = accounts.firstIndex(where: { $0.platform == account.platform }) { accounts[index].isActive = true }
         persistAccounts()
@@ -109,7 +124,10 @@ final class AccountManager {
     func refreshAllQuotas() async {
         for index in accounts.indices {
             guard !Task.isCancelled else { return }
-            guard let reference = accounts[index].credentialReference else { continue }
+            guard let reference = accounts[index].credentialReference else {
+                if accounts[index].platform == .antigravity { accounts[index].lastError = "請另行匯入 Antigravity 帳號 JSON 以更新額度" }
+                continue
+            }
             do {
                 guard let data = try keychainService.load(account: reference) else { throw QuotaError.missingToken }
                 accounts[index].quota = try await quotaService.fetch(for: accounts[index], credentialData: data)

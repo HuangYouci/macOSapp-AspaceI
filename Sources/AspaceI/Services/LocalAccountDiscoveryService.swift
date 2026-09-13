@@ -17,7 +17,7 @@ final class LocalAccountDiscoveryService: Sendable {
         let candidates: [(PlatformKind, URL)] = [
             (.codex, homeDirectory.appending(path: ".codex/auth.json")),
             (.claude, homeDirectory.appending(path: ".claude/.credentials.json")),
-            (.antigravity, applicationSupport.appending(path: "Antigravity/User/globalStorage/state.vscdb")),
+            (.antigravity, applicationSupport.appending(path: "Antigravity IDE/User/globalStorage/state.vscdb")),
             (.githubCopilot, homeDirectory.appending(path: ".config/gh/hosts.yml"))
         ]
 

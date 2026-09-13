@@ -25,7 +25,8 @@ final class InstanceManager {
                 let data = try accounts.credentialData(for: accountID)
                 try CredentialProjectionService.shared.project(account: account, credentialData: data, to: URL(fileURLWithPath: instance.profileDirectory))
             }
-            try service.launch(instance)
+            let credentialData = try instance.accountID.flatMap { try accounts.credentialData(for: $0) }
+            try service.launch(instance, credentialData: credentialData)
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -34,8 +35,11 @@ final class InstanceManager {
 
     func remove(_ instance: Instance) {
         stop(instance)
-        instances.removeAll { $0.id == instance.id }
-        persist()
+        do {
+            try service.trashProfile(for: instance)
+            instances.removeAll { $0.id == instance.id }
+            persist()
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private func persist() {
