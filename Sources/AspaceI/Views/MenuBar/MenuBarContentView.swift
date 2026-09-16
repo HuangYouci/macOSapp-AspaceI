@@ -6,8 +6,7 @@ struct MenuBarContentView: View {
     @Environment(AccountLoginManager.self) private var loginManager
     @State private var selection = Section.quota
     @State private var editor: Editor?
-    @State private var pendingRemoval: Account?
-    @State private var pendingSwitch: (account: Account, appName: String)?
+    @State private var confirmation: ConfirmationRequest?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -24,7 +23,7 @@ struct MenuBarContentView: View {
                 case .instances:
                     InstanceListView { editor = .instance($0) }
                 case .settings:
-                    ScrollView { SettingsView().padding(2) }
+                    ScrollView { SettingsView(confirm: { confirmation = $0 }).padding(2) }
                 }
             }
 
@@ -50,30 +49,10 @@ struct MenuBarContentView: View {
             default: editor = .account
             }
         }
-        .confirmationDialog(
-            "刪除 \(pendingRemoval?.label ?? "")？",
-            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
-            presenting: pendingRemoval
-        ) { account in
-            Button("刪除", role: .destructive) {
-                accountManager.remove(account)
-                pendingRemoval = nil
+        .overlay {
+            if let request = confirmation {
+                ConfirmationOverlay(request: request) { confirmation = nil }
             }
-        } message: { account in
-            Text("\(account.platform.displayName) 的登入資料會從 AspaceI 移除，官方 App 的登入不受影響。")
-        }
-        .confirmationDialog(
-            "切換到 \(pendingSwitch?.account.label ?? "")？",
-            isPresented: Binding(get: { pendingSwitch != nil }, set: { if !$0 { pendingSwitch = nil } })
-        ) {
-            if let pending = pendingSwitch {
-                Button("關閉 \(pending.appName) 並切換") {
-                    pendingSwitch = nil
-                    Task { await instanceManager.switchDefault(to: pending.account, accounts: accountManager) }
-                }
-            }
-        } message: {
-            Text("\(pendingSwitch?.appName ?? "") 正在執行，未儲存的內容可能遺失。")
         }
         .onChange(of: loginManager.phase) { _, phase in
             if case .succeeded = phase {
@@ -137,14 +116,29 @@ struct MenuBarContentView: View {
                     onSwitch: { account in
                         Task {
                             if let appName = await instanceManager.runningDefaultAppName(for: account.platform) {
-                                pendingSwitch = (account, appName)
+                                confirmation = ConfirmationRequest(
+                                    title: "切換到 \(account.label)？",
+                                    message: "\(appName) 正在執行，未儲存的內容可能遺失。",
+                                    confirmTitle: "關閉 \(appName) 並切換",
+                                    isDestructive: false
+                                ) {
+                                    Task { await instanceManager.switchDefault(to: account, accounts: accountManager) }
+                                }
                             } else {
                                 await instanceManager.switchDefault(to: account, accounts: accountManager)
                             }
                         }
                     },
                     onActivate: { accountManager.activate($0) },
-                    onRemove: { pendingRemoval = $0 }
+                    onRemove: { account in
+                        confirmation = ConfirmationRequest(
+                            title: "刪除 \(account.label)？",
+                            message: "\(account.platform.displayName) 的登入資料會從 AspaceI 移除，官方 App 的登入不受影響。",
+                            confirmTitle: "刪除"
+                        ) {
+                            accountManager.remove(account)
+                        }
+                    }
                 )
                     .padding(2)
             }

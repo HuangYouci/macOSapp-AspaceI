@@ -3,8 +3,9 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(SettingsManager.self) private var settingsManager
     @Environment(AccountManager.self) private var accountManager
+    /// 二次確認交給 popup 外層呈現：MenuBarExtra 的面板收不到系統對話框的點擊。
+    let confirm: (ConfirmationRequest) -> Void
     @State private var exportDocument: AccountExportDocument?
-    @State private var confirmsExport = false
     @State private var showsImporter = false
 
     var body: some View {
@@ -53,8 +54,21 @@ struct SettingsView: View {
                 row {
                     Text("匯出帳號")
                     Spacer()
-                    Button("匯出…") { confirmsExport = true }
-                        .disabled(accountManager.accounts.isEmpty)
+                    Button("匯出…") {
+                        confirm(ConfirmationRequest(
+                            title: "匯出檔含登入憑證",
+                            message: "匯出的檔案包含所有帳號的完整登入憑證，拿到檔案的人就能登入這些帳號。",
+                            confirmTitle: "匯出全部帳號",
+                            isDestructive: false
+                        ) {
+                            do {
+                                exportDocument = AccountExportDocument(data: try accountManager.exportData())
+                            } catch {
+                                accountManager.errorMessage = error.localizedDescription
+                            }
+                        })
+                    }
+                    .disabled(accountManager.accounts.isEmpty)
                 }
             }
 
@@ -100,15 +114,6 @@ struct SettingsView: View {
         .padding(.bottom, 4)
         .onAppear {
             settingsManager.refreshLaunchAtLoginStatus()
-        }
-        .confirmationDialog("匯出檔含登入憑證", isPresented: $confirmsExport) {
-            Button("匯出全部帳號") {
-                do {
-                    exportDocument = AccountExportDocument(data: try accountManager.exportData())
-                } catch {
-                    accountManager.errorMessage = error.localizedDescription
-                }
-            }
         }
         .fileExporter(
             isPresented: Binding(get: { exportDocument != nil }, set: { if !$0 { exportDocument = nil } }),
