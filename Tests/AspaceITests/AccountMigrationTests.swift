@@ -53,7 +53,30 @@ struct DefaultClientTests {
         let file = try JSONSerialization.data(withJSONObject: ["tokens": ["id_token": "h.\(payload).s", "access_token": "a", "refresh_token": "r"]])
         #expect(AccountManager.localFile(file, belongsTo: Account(platform: .codex, displayName: "", email: "A@x.com")))
         #expect(!AccountManager.localFile(file, belongsTo: Account(platform: .codex, displayName: "", email: "b@x.com")))
-        #expect(AccountManager.localFile(file, belongsTo: Account(platform: .codex, displayName: "", email: nil)))
+        #expect(AccountManager.localFile(file, belongsTo: Account(platform: .codex, displayName: "", email: nil, origin: .local)))
+        #expect(!AccountManager.localFile(file, belongsTo: Account(platform: .codex, displayName: "", email: nil, origin: .oauth)))
+    }
+
+    @Test("Antigravity 官方檔換成別的帳號時不覆寫切換進來的帳號")
+    func antigravityFileIdentityGuard() throws {
+        let payload = try JSONSerialization.data(withJSONObject: ["email": "a@x.com"]).base64URLEncoded
+        let file = try JSONSerialization.data(withJSONObject: [
+            "id_token": "h.\(payload).s",
+            "token": ["access_token": "a", "refresh_token": "ra"]
+        ])
+        let switched = Account(platform: .antigravity, displayName: "b", email: "b@x.com", origin: .file)
+        #expect(!AccountManager.localFile(file, belongsTo: switched))
+        #expect(AccountManager.localFile(file, belongsTo: Account(platform: .antigravity, displayName: "a", email: "a@x.com", origin: .file)))
+    }
+
+    @Test("身分不明時比對 refresh token：同一個登入才同步回帳號")
+    func antigravityRefreshTokenGuard() throws {
+        let file = try JSONSerialization.data(withJSONObject: ["token": ["access_token": "new", "refresh_token": "ra"]])
+        let sameLogin = try JSONSerialization.data(withJSONObject: ["refresh_token": "ra"])
+        let otherLogin = try JSONSerialization.data(withJSONObject: ["refresh_token": "rb"])
+        let account = Account(platform: .antigravity, displayName: "b", origin: .file)
+        #expect(AccountManager.localFile(file, belongsTo: account, credential: sameLogin))
+        #expect(!AccountManager.localFile(file, belongsTo: account, credential: otherLogin))
     }
 }
 

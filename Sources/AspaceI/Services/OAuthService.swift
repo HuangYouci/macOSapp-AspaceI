@@ -215,7 +215,7 @@ final class OAuthService: Sendable {
         guard let accessToken = value["access_token"] as? String,
               let refreshToken = value["refresh_token"] as? String else { throw OAuthError.missingRefreshToken }
         let expiresIn = (value["expires_in"] as? NSNumber)?.doubleValue ?? 3_600
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "auth_method": "consumer",
             "token": [
                 "access_token": accessToken,
@@ -224,7 +224,11 @@ final class OAuthService: Sendable {
                 "expiry": ISO8601DateFormatter().string(from: now.addingTimeInterval(expiresIn))
             ]
         ]
-        return OAuthCredential(platform: .antigravity, data: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), email: nil)
+        // id_token 是官方 App 與 AspaceI 判斷這份憑證屬於誰的依據，登入時就留下來。
+        let idToken = value["id_token"] as? String
+        if let idToken, !idToken.isEmpty { object["id_token"] = idToken }
+        let email = idToken.flatMap { jwtClaims($0)?["email"] as? String }
+        return OAuthCredential(platform: .antigravity, data: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), email: email)
     }
 
     // MARK: GitHub 裝置流程

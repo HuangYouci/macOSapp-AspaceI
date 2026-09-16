@@ -74,9 +74,12 @@ final class AccountManager {
         for item in imported {
             if let switched = defaultClientAccountIDs[item.platform],
                let target = accounts.first(where: { $0.id == switched && $0.origin != .local }) {
-                if let data = item.data, let reference = target.credentialReference, Self.localFile(data, belongsTo: target) {
+                if let data = item.data, let reference = target.credentialReference {
                     do {
-                        try keychainService.save(data, account: reference)
+                        let stored = try keychainService.load(account: reference)
+                        if Self.localFile(data, belongsTo: target, credential: stored) {
+                            try keychainService.save(data, account: reference)
+                        }
                     } catch {
                         errorMessage = error.localizedDescription
                     }
@@ -339,10 +342,10 @@ final class AccountManager {
         for item in imported {
             guard let data = item.data,
                   let account = defaultClientAccount(for: item.platform),
-                  let reference = account.credentialReference,
-                  Self.localFile(data, belongsTo: account) else { continue }
+                  let reference = account.credentialReference else { continue }
             do {
-                guard try keychainService.load(account: reference) != data else { continue }
+                let stored = try keychainService.load(account: reference)
+                guard stored != data, Self.localFile(data, belongsTo: account, credential: stored) else { continue }
                 try keychainService.save(data, account: reference)
             } catch {
                 errorMessage = error.localizedDescription
@@ -350,13 +353,48 @@ final class AccountManager {
         }
     }
 
-    /// 使用者可能在官方 App 裡自己換了帳號；Codex 的檔案帶 email，對不上就不覆寫。
-    static func localFile(_ data: Data, belongsTo account: Account) -> Bool {
-        guard account.platform == .codex, let email = account.email,
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let idToken = (root["tokens"] as? [String: Any])?["id_token"] as? String,
-              let fileEmail = OAuthService.jwtClaims(idToken)?["email"] as? String else { return true }
-        return fileEmail.caseInsensitiveCompare(email) == .orderedSame
+    /// 使用者可能在官方 App 裡自己換了帳號：能從檔案取得身分就比對身分，取不到就比對 refresh token，
+    /// 兩者都判斷不出來時只信任本機匯入的帳號，否則會把官方 App 的帳號蓋到切換進來的帳號上。
+    static func localFile(_ data: Data, belongsTo account: Account, credential: Data? = nil) -> Bool {
+        if let fileEmail = credentialEmail(data, platform: account.platform) {
+            if let email = account.email {
+                return fileEmail.caseInsensitiveCompare(email) == .orderedSame
+            }
+            if let credential, let storedEmail = credentialEmail(credential, platform: account.platform) {
+                return fileEmail.caseInsensitiveCompare(storedEmail) == .orderedSame
+            }
+        }
+        if let credential,
+           let fileToken = credentialRefreshToken(data, platform: account.platform),
+           let storedToken = credentialRefreshToken(credential, platform: account.platform) {
+            return fileToken == storedToken
+        }
+        return account.origin == .local
+    }
+
+    /// 憑證裡的登入身分：Codex 與 Antigravity 都帶 id_token，Claude 與 GitHub 的憑證看不出身分。
+    static func credentialEmail(_ data: Data, platform: PlatformKind) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let idToken: String?
+        switch platform {
+        case .codex:
+            idToken = (root["tokens"] as? [String: Any])?["id_token"] as? String ?? root["id_token"] as? String
+        case .antigravity:
+            idToken = root["id_token"] as? String ?? (root["token"] as? [String: Any])?["id_token"] as? String
+        case .claude, .githubCopilot:
+            idToken = nil
+        }
+        guard let idToken, let email = OAuthService.jwtClaims(idToken)?["email"] as? String, !email.isEmpty else { return nil }
+        return email
+    }
+
+    /// Antigravity（Google）的 refresh token 不輪替，可以用來確認檔案與帳號是同一個登入。
+    static func credentialRefreshToken(_ data: Data, platform: PlatformKind) -> String? {
+        guard platform == .antigravity,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let token = root["token"] as? [String: Any] ?? root
+        let value = token["refresh_token"] as? String ?? token["refreshToken"] as? String
+        return (value?.isEmpty == false) ? value : nil
     }
 
     private func refreshQuotasOnce() async {

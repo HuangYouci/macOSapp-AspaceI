@@ -56,7 +56,7 @@ final class CredentialProjectionService: Sendable {
         guard let refreshToken = token["refresh_token"] as? String ?? token["refreshToken"] as? String, !refreshToken.isEmpty else {
             throw CredentialProjectionError.incompleteCredential
         }
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "auth_method": root["auth_method"] as? String ?? "consumer",
             "token": [
                 "access_token": token["access_token"] as? String ?? "",
@@ -65,6 +65,10 @@ final class CredentialProjectionService: Sendable {
                 "expiry": token["expiry"] as? String ?? "1970-01-01T00:00:00Z"
             ]
         ]
+        // 官方檔案本身就帶 id_token（登入身分），有就照原樣寫回去，不要在切換時弄丟。
+        if let idToken = root["id_token"] as? String ?? token["id_token"] as? String, !idToken.isEmpty {
+            object["id_token"] = idToken
+        }
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
