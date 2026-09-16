@@ -9,13 +9,20 @@ struct QuotaTableView: View {
     let onRemove: (Account) -> Void
 
     private static let columns: [QuotaWindow.Kind] = [.fiveHour, .week, .month]
-    private static let valueWidth: CGFloat = 58
+    private static let valueWidth: CGFloat = 64
     private static let menuWidth: CGFloat = 30
 
     var body: some View {
+        // 倒數每秒重畫；popup 收起時視圖消失，不會在背景持續更新。
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            content(now: context.date)
+        }
+    }
+
+    private func content(now: Date) -> some View {
         VStack(spacing: 10) {
             ForEach(sections, id: \.platform) { section in
-                card(section.platform, accounts: section.accounts)
+                card(section.platform, accounts: section.accounts, now: now)
             }
             if let updatedAt = accounts.compactMap(\.quota?.fetchedAt).max() {
                 Text("更新於 \(updatedAt.formatted(date: .omitted, time: .shortened))")
@@ -34,7 +41,7 @@ struct QuotaTableView: View {
         }
     }
 
-    private func card(_ platform: PlatformKind, accounts: [Account]) -> some View {
+    private func card(_ platform: PlatformKind, accounts: [Account], now: Date) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 HStack(spacing: 7) {
@@ -59,14 +66,14 @@ struct QuotaTableView: View {
                 if index > 0 {
                     Divider().padding(.leading, 14)
                 }
-                row(account)
+                row(account, now: now)
             }
         }
         .padding(.bottom, 4)
         .cardStyle()
     }
 
-    private func row(_ account: Account) -> some View {
+    private func row(_ account: Account, now: Date) -> some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -94,7 +101,7 @@ struct QuotaTableView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             ForEach(Self.columns, id: \.self) { kind in
-                valueCell(account.quota?.primaryWindows.first { $0.kind == kind })
+                valueCell(account.quota?.primaryWindows.first { $0.kind == kind }, now: now)
             }
 
             Menu {
@@ -136,12 +143,20 @@ struct QuotaTableView: View {
         Button("刪除…", systemImage: "trash", role: .destructive) { onRemove(account) }
     }
 
-    private func valueCell(_ window: QuotaWindow?) -> some View {
-        Group {
+    private func valueCell(_ window: QuotaWindow?, now: Date) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
             if let window {
                 Text("\(window.remainingPercentage)%")
                     .font(.scaled(.subheadline, weight: .medium, design: .rounded))
                     .monospacedDigit()
+                if let resetsAt = window.resetsAt, let countdown = QuotaCountdown.text(until: resetsAt, now: now) {
+                    Text(countdown)
+                        .font(.scaled(.caption2))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
             } else {
                 Text("–")
                     .font(.scaled(.subheadline))

@@ -1,3 +1,8 @@
 "QuotaWindowSession" = "段";
 "QuotaWindowWeek" = "週";
 "QuotaWindowMonth" = "月";
+"CountdownDay" = "天";
+"CountdownHour" = "時";
+"CountdownMinute" = "分";
+"CountdownSecond" = "秒";
+"CountdownSeparator" = "";

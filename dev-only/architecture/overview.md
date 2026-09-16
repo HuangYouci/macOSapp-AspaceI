@@ -1,8 +1,8 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-09-14
+最後更新日期：2026-09-16
 
-對應功能／commit：AspaceI 26.9.13 帳號切換（預設實例）、刪除確認、Codex 方案 5x/20x；多實例啟動修正（四平台實測）
+對應功能／commit：popup 二次確認改為自繪覆蓋卡片、額度重置倒數、官方檔案同步的帳號歸屬判斷
 
 ## 邊界
 
@@ -29,7 +29,7 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 
 ### Token 保活
 
-- 本機匯入的帳號：每輪先從官方客戶端的檔案重新讀取憑證（只讀檔案），內容變了才寫回 Keychain；由官方客戶端負責換新。
+- 本機匯入的帳號：每輪先從官方客戶端的檔案重新讀取憑證（只讀檔案），內容變了才寫回 Keychain；由官方客戶端負責換新。寫回前先確認檔案屬於該帳號（`AccountManager.localFile`）：能從 id_token 取得身分就比對身分，取不到就比對 refresh token（Google 的不輪替），兩者都判斷不出來時只信任 `origin == .local` 的帳號。少了這道判斷，使用者在官方 App 裡換回別的帳號後，AspaceI 會把官方 App 的憑證蓋到切換進來的帳號上，畫面看起來就像「切換沒有生效」。
 - AspaceI 自己登入或從檔案匯入的帳號：Claude 在 `expiresAt` 前一分鐘換新；Codex 在 `last_refresh` 超過 7 天（或沒有紀錄）時換新；兩者遇到 401/403 也會換新重試。Antigravity 每次都用 refresh token 換 access token；GitHub device flow token 不會過期。
 - 只在 App 執行時運作，需要常駐請開「登入時開啟」。
 
@@ -55,6 +55,8 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 - Menu bar 最多顯示三個使用者在設定勾選的帳號，格式為「平台單色標誌 帳號前三字 5h% 7d%」，以 `|` 分隔；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
 - App Icon 原始檔為 `Support/AppIcon.icon`（Icon Composer 格式），`build-app.sh` 以 `actool` 編譯為 `Assets.car` 與 `AppIcon.icns`；menu bar 圖示與平台單色標誌為 `Resources/Logos/*-glyph.png`。
 - 額度頁（`QuotaTableView`）每個平台一張卡片，卡片標題列同時是欄名（段／週／月），三欄在所有卡片對齊以便比較；沒有該時窗顯示「–」。只顯示百分比，不用顏色區分高低。底部顯示最近一次更新時間。
+- 有百分比的格子在下方顯示該時窗的重置倒數（`QuotaCountdown`）：最多兩個時間單位，第二個單位為零時只顯示一個，已重置則不顯示。整張表包在 `TimelineView(.periodic(from:by:))` 的每秒節拍裡重畫，popup 收起後視圖消失就不再更新。
+- popup 內的二次確認一律用 `ConfirmationOverlay` 蓋在畫面上，不用 `confirmationDialog`／`alert`：MenuBarExtra 的面板不會成為 key window，系統對話框畫得出來但收不到點擊。確認請求由畫面外部注入（`ConfirmationRequest`），統一由 `MenuBarContentView` 呈現。
 - 卡片一律使用 `cardStyle()`：白底、連續圓角、極淡陰影，不畫外框。
 - 平台彩色圖示取用 `Sources/AspaceI/Resources/Logos/` 內的官方標誌，經 `Bundle.module` 載入；`scripts/build-app.sh` 必須將 SwiftPM resource bundle 一併複製進 `.app`。
 - 使用者只能從 popup 的「結束 AspaceI」真正終止 App。
@@ -73,7 +75,7 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 | Claude | PKCE，官方手動回呼頁 | 使用者把頁面上的 `code#state` 貼回 App |
 | GitHub Copilot | Device flow（Copilot GitHub App client） | 輪詢；使用者碼自動複製並開啟驗證頁 |
 
-OAuth 取得的憑證寫成各官方客戶端的原生格式（Codex `auth.json`、Claude Code `.credentials.json`、Antigravity `jetski-standalone-oauth-token`），因此可直接投影到實例或官方客戶端。同平台同 email 的帳號視為同一人，重新登入時覆寫憑證。
+OAuth 取得的憑證寫成各官方客戶端的原生格式（Codex `auth.json`、Claude Code `.credentials.json`、Antigravity `jetski-standalone-oauth-token`），因此可直接投影到實例或官方客戶端。Antigravity 另外保留回應中的 `id_token`，它同時是官方檔案的登入身分與 AspaceI 判斷憑證屬於誰的依據。同平台同 email 的帳號視為同一人，重新登入時覆寫憑證。
 
 ### Token 輪替
 
@@ -111,7 +113,7 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 ### 切換帳號
 
-「切換」＝把預設實例（官方 App）換成這個帳號，目前只支援 Codex（寫 `~/.codex/auth.json`，需要完整 tokens）與 Antigravity（寫 `~/.gemini/jetski-standalone-oauth-token`，只有 refresh token 時給過期的 access token 讓官方 App 自己換新）。Claude Desktop、VS Code 的登入存在各自加密的儲存區，只能「設為目前帳號」（僅影響 AspaceI 內的粗體標示）。
+「切換」＝把預設實例（官方 App）換成這個帳號，目前只支援 Codex（寫 `~/.codex/auth.json`，需要完整 tokens）與 Antigravity（寫 `~/.gemini/jetski-standalone-oauth-token`，帶得出 `id_token` 就一起寫回去，只有 refresh token 時給過期的 access token 讓官方 App 自己換新）。Claude Desktop、VS Code 的登入存在各自加密的儲存區，只能「設為目前帳號」（僅影響 AspaceI 內的粗體標示）。
 
 流程由 `InstanceManager.switchDefault` 負責：官方 App 在執行時先確認 → SIGTERM 並等到主程序結束（最多 10 秒，逾時則不切換）→ `AccountManager.switchDefaultClient` 寫檔、記錄 `defaultClientAccountIDs`、設為目前帳號 → 重新開啟 App。
 
