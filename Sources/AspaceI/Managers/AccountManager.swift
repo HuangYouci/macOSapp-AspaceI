@@ -50,12 +50,43 @@ final class AccountManager {
     }
 
     /// 把帳號寫進官方 App 的預設位置並設為目前帳號；關閉與重開 App 由 `InstanceManager` 負責。
-    func switchDefaultClient(to account: Account) throws {
-        let data = try account.credentialReference.flatMap { try keychainService.load(account: $0) }
+    func switchDefaultClient(to account: Account) async throws {
+        guard let reference = account.credentialReference,
+              let stored = try keychainService.load(account: reference) else {
+            throw CredentialProjectionError.credentialMissing
+        }
+        // 官方 App 讀的是可用的 access token，切換前先換一份完整憑證；換不到就用手上這份試。
+        var data = stored
+        if account.platform == .antigravity {
+            if let refreshed = try? await OAuthService.shared.refreshAntigravity(stored) {
+                data = refreshed
+                try keychainService.save(refreshed, account: reference)
+                adoptIdentity(from: refreshed, for: account)
+            } else if !Self.antigravityTokenUsable(stored) {
+                throw QuotaError.tokenExpired
+            }
+        }
         try CredentialProjectionService.shared.projectToDefaultClient(account: account, credentialData: data)
         defaultClientAccountIDs[account.platform] = account.id
         persistDefaultClientAccounts()
         activate(account)
+    }
+
+    /// 換不到新 token 時，手上的 access token 還沒過期才值得寫出去。
+    nonisolated static func antigravityTokenUsable(_ data: Data, now: Date = .now) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        let token = root["token"] as? [String: Any] ?? root
+        guard let accessToken = token["access_token"] as? String, !accessToken.isEmpty else { return false }
+        guard let expiry = token["expiry"] as? String, let date = OAuthService.isoDate(expiry) else { return false }
+        return date > now
+    }
+
+    /// 換發回來的 id_token 帶著登入身分，順手補進帳號，之後才判斷得出官方檔案屬於誰。
+    private func adoptIdentity(from credential: Data, for account: Account) {
+        guard let email = Self.credentialEmail(credential, platform: account.platform),
+              let index = accounts.firstIndex(where: { $0.id == account.id }) else { return }
+        accounts[index].email = email
+        persistAccounts()
     }
 
     func importLocalAccounts(includeKeychain: Bool = true, platforms: Set<PlatformKind> = Set(PlatformKind.allCases)) async {

@@ -107,7 +107,7 @@ final class InstanceManager {
             if !instance.executablePath.isEmpty {
                 try await quit(instance)
             }
-            try accounts.switchDefaultClient(to: account)
+            try await accounts.switchDefaultClient(to: account)
             if !instance.executablePath.isEmpty {
                 try service.launch(instance, isDefault: true)
                 scheduleRunningRefresh()

@@ -75,6 +75,42 @@ struct OAuthServiceTests {
         }
     }
 
+    @Test("Antigravity 授權要求 openid 才拿得到 id_token")
+    func antigravityAuthorizationRequestsOpenID() throws {
+        let authorization = try #require(OAuthService.authorization(for: .antigravity))
+        let items = try #require(URLComponents(url: authorization.url, resolvingAgainstBaseURL: false)?.queryItems)
+        let scope = try #require(items.first { $0.name == "scope" }?.value)
+        #expect(scope.split(separator: " ").contains("openid"))
+    }
+
+    @Test("Antigravity 換發：沿用原本的 refresh token，寫入新的 access token 與到期時間")
+    func antigravityRefreshKeepsRefreshToken() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let existing = Data(#"{"auth_method":"consumer","token":{"access_token":"old","refresh_token":"1//r","expiry":"1970-01-01T00:00:00Z"}}"#.utf8)
+        let refreshed = try OAuthService.antigravityRefreshed(
+            from: ["access_token": "new", "expires_in": 3_599 as NSNumber, "id_token": "h.p.s"],
+            existing: existing,
+            now: now
+        )
+        let root = try #require(try JSONSerialization.jsonObject(with: refreshed) as? [String: Any])
+        let token = try #require(root["token"] as? [String: Any])
+        #expect(token["access_token"] as? String == "new")
+        #expect(token["refresh_token"] as? String == "1//r")
+        #expect(root["id_token"] as? String == "h.p.s")
+        let expiry = try #require((token["expiry"] as? String).flatMap(OAuthService.isoDate))
+        #expect(expiry > now)
+        #expect(AccountManager.antigravityTokenUsable(refreshed, now: now))
+        #expect(!AccountManager.antigravityTokenUsable(existing, now: now))
+    }
+
+    @Test("Antigravity 換發沒有 access token 就失敗")
+    func antigravityRefreshRequiresAccessToken() {
+        let existing = Data(#"{"refresh_token":"1//r"}"#.utf8)
+        #expect(throws: OAuthError.invalidResponse) {
+            try OAuthService.antigravityRefreshed(from: ["expires_in": 3_599 as NSNumber], existing: existing)
+        }
+    }
+
     @Test("回呼伺服器只接受指定路徑")
     func parsesCallbackRequest() {
         let query = OAuthCallbackServer.parseRequest("GET /auth/callback?code=abc&state=s HTTP/1.1\r\nHost: localhost\r\n\r\n", expectedPath: "/auth/callback")

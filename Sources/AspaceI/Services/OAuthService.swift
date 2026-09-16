@@ -59,6 +59,8 @@ enum OAuthClient {
     static let antigravitySecret = "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"
     static let antigravityPort: UInt16 = 51121
     static let antigravityScopes = [
+        // openid 才拿得到 id_token，官方 token 檔靠它標示目前的登入身分。
+        "openid",
         "https://www.googleapis.com/auth/cloud-platform",
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
@@ -309,6 +311,50 @@ final class OAuthService: Sendable {
         return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
     }
 
+    /// Antigravity 官方 App 讀的是可用的 access token；切換帳號前用 refresh token 換一份完整的。
+    /// Google 的 refresh token 不輪替，換發不會影響其他地方的登入。
+    func refreshAntigravity(_ data: Data) async throws -> Data {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw OAuthError.invalidResponse }
+        let token = root["token"] as? [String: Any] ?? root
+        guard let refreshToken = token["refresh_token"] as? String ?? token["refreshToken"] as? String, !refreshToken.isEmpty else {
+            throw OAuthError.missingRefreshToken
+        }
+        let value = try await postForm("https://oauth2.googleapis.com/token", [
+            "client_id": OAuthClient.antigravityID,
+            "client_secret": OAuthClient.antigravitySecret,
+            "refresh_token": refreshToken,
+            "grant_type": "refresh_token"
+        ])
+        return try Self.antigravityRefreshed(from: value, existing: data)
+    }
+
+    /// 把 refresh 回應併回原憑證：回應不帶 refresh token，沿用原本的。
+    static func antigravityRefreshed(from value: [String: Any], existing: Data, now: Date = .now) throws -> Data {
+        guard let root = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] else { throw OAuthError.invalidResponse }
+        let previous = root["token"] as? [String: Any] ?? root
+        guard let accessToken = value["access_token"] as? String, !accessToken.isEmpty else { throw OAuthError.invalidResponse }
+        guard let refreshToken = value["refresh_token"] as? String
+            ?? previous["refresh_token"] as? String
+            ?? previous["refreshToken"] as? String else { throw OAuthError.missingRefreshToken }
+        let expiresIn = (value["expires_in"] as? NSNumber)?.doubleValue ?? 3_600
+        var object: [String: Any] = [
+            "auth_method": root["auth_method"] as? String ?? "consumer",
+            "token": [
+                "access_token": accessToken,
+                "refresh_token": refreshToken,
+                "token_type": value["token_type"] as? String ?? "Bearer",
+                "expiry": ISO8601DateFormatter().string(from: now.addingTimeInterval(expiresIn))
+            ]
+        ]
+        if let idToken = value["id_token"] as? String ?? root["id_token"] as? String, !idToken.isEmpty {
+            object["id_token"] = idToken
+        }
+        if let project = root["project_id"] as? String ?? previous["project_id"] as? String {
+            object["project_id"] = project
+        }
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
     static func claudeTokenExpired(_ data: Data, now: Date = .now) -> Bool {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = root["claudeAiOauth"] as? [String: Any],
@@ -323,6 +369,8 @@ final class OAuthService: Sendable {
         guard let lastRefresh = (root["last_refresh"] as? String).flatMap(parseISODate) else { return true }
         return now.timeIntervalSince(lastRefresh) > 7 * 24 * 3600
     }
+
+    static func isoDate(_ value: String) -> Date? { parseISODate(value) }
 
     private static func parseISODate(_ value: String) -> Date? {
         let formatter = ISO8601DateFormatter()

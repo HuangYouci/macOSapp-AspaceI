@@ -2,7 +2,7 @@
 
 最後更新日期：2026-09-16
 
-對應功能／commit：popup 二次確認改為自繪覆蓋卡片、額度重置倒數、官方檔案同步的帳號歸屬判斷
+對應功能／commit：popup 二次確認改為自繪覆蓋卡片、額度重置倒數、官方檔案同步的帳號歸屬判斷、切換 Antigravity 前換發完整 token
 
 ## 邊界
 
@@ -113,7 +113,11 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 ### 切換帳號
 
-「切換」＝把預設實例（官方 App）換成這個帳號，目前只支援 Codex（寫 `~/.codex/auth.json`，需要完整 tokens）與 Antigravity（寫 `~/.gemini/jetski-standalone-oauth-token`，帶得出 `id_token` 就一起寫回去，只有 refresh token 時給過期的 access token 讓官方 App 自己換新）。Claude Desktop、VS Code 的登入存在各自加密的儲存區，只能「設為目前帳號」（僅影響 AspaceI 內的粗體標示）。
+「切換」＝把預設實例（官方 App）換成這個帳號，目前只支援 Codex（寫 `~/.codex/auth.json`，需要完整 tokens）與 Antigravity（寫 `~/.gemini/jetski-standalone-oauth-token`）。
+
+Antigravity 切換前一定先用 refresh token 換一份可用的 access token（`OAuthService.refreshAntigravity`），連同 `id_token` 與未來的 `expiry` 一起寫進官方檔案，換發結果同時寫回 Keychain 並把 id_token 裡的 email 補進帳號。只寫 refresh token、access token 留空、expiry 給 1970 的檔案不算切換成功：官方 App（Electron）自己保有 Google 登入 session，拿到不能用的憑證會靜默回到原本的帳號，再把檔案改寫回去。換不到新 token 且手上的 access token 也過期時，直接讓切換失敗，不寫半份檔案。
+
+比對過 cockpit-tools（2026-09-13 的資料目錄）：它每個 Antigravity 帳號只存 `email` 與 `refresh_token`，沒有任何 access token 或 IDE 狀態快照，所以切換當下必然是自己去換 token。實測該 refresh token 仍可換到帶 `openid` scope 的回應（含 `id_token`），因此 AspaceI 的授權 scope 也補上 `openid`，自己登入的帳號才拿得到 id_token。這台 Mac 上現行的 Antigravity 把登入放在 `~/.gemini/jetski-standalone-oauth-token`，Application Support 內沒有 `state.vscdb`（舊版 Antigravity IDE 才有）。Claude Desktop、VS Code 的登入存在各自加密的儲存區，只能「設為目前帳號」（僅影響 AspaceI 內的粗體標示）。
 
 流程由 `InstanceManager.switchDefault` 負責：官方 App 在執行時先確認 → SIGTERM 並等到主程序結束（最多 10 秒，逾時則不切換）→ `AccountManager.switchDefaultClient` 寫檔、記錄 `defaultClientAccountIDs`、設為目前帳號 → 重新開啟 App。
 
