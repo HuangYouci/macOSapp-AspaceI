@@ -15,6 +15,41 @@ final class AntigravitySystemCredentialService: Sendable {
 
     /// 讀官方 App 目前使用的登入。這個項目由官方 App 以「允許所有程式」建立，讀取不會跳授權視窗。
     func load() -> Data? {
+        guard let raw = rawItem() else { return nil }
+        return Self.decode(raw)
+    }
+
+    /// 寫回官方 App 讀的位置。必須走 `security -A`：以 SecItemAdd 建立的項目只有 AspaceI 自己能讀，
+    /// 官方 App 會被 Keychain 拒絕而當成沒登入。先刪再加是為了換掉既有項目的存取控制。
+    ///
+    /// 憑證只能放在 `-w` 的參數值裡。`-w` 不帶值改由 stdin 讀時，`security` 會在 128 個字元處
+    /// 無聲截斷（2026-09-18 實測：送 418 字元讀回 128），寫出一份半截的 JSON 把官方 App 的登入弄壞。
+    /// 代價是憑證會短暫出現在行程參數列，取捨後選會動的那個，與 cockpit-tools 相同。
+    func save(_ credential: Data) throws {
+        let payload = Self.prefix + Self.canonical(credential).base64EncodedString()
+        // 寫壞了要能還原：先留住現有項目，驗證沒過就放回去，不留半份憑證在官方 App 的登入位置。
+        let previous = rawItem()
+        _ = try? run(["delete-generic-password", "-s", Self.service, "-a", Self.account])
+        let result = try run(["add-generic-password", "-s", Self.service, "-a", Self.account, "-w", payload, "-A"])
+        guard result.status == 0 else {
+            try? restore(previous)
+            throw CredentialProjectionError.systemCredentialWriteFailed(result.error)
+        }
+        // 讀回來逐位元組比對。Keychain 寫入沒有回報長度，不驗就可能把截斷或編碼錯誤當成切換成功。
+        guard let written = rawItem(), written == Data(payload.utf8) else {
+            try? restore(previous)
+            throw CredentialProjectionError.systemCredentialWriteFailed("寫入後讀回的內容與原文不符")
+        }
+    }
+
+    private func restore(_ previous: Data?) throws {
+        guard let previous, let text = String(data: previous, encoding: .utf8) else { return }
+        _ = try? run(["delete-generic-password", "-s", Self.service, "-a", Self.account])
+        _ = try run(["add-generic-password", "-s", Self.service, "-a", Self.account, "-w", text, "-A"])
+    }
+
+    /// 項目的原始內容（還沒解 go-keyring 包裝），用於寫入前備份與寫入後比對。
+    private func rawItem() -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
@@ -23,24 +58,8 @@ final class AntigravitySystemCredentialService: Sendable {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let raw = result as? Data else { return nil }
-        return Self.decode(raw)
-    }
-
-    /// 寫回官方 App 讀的位置。必須走 `security -A`：以 SecItemAdd 建立的項目只有 AspaceI 自己能讀，
-    /// 官方 App 會被 Keychain 拒絕而當成沒登入。先刪再加是為了換掉既有項目的存取控制。
-    func save(_ credential: Data) throws {
-        let payload = Self.prefix + Self.canonical(credential).base64EncodedString()
-        _ = try? run(["delete-generic-password", "-s", Self.service, "-a", Self.account], input: nil)
-        // `-w` 不帶值時改從 stdin 讀（要輸入兩次），避免憑證出現在行程的參數列裡。
-        let result = try run(
-            ["add-generic-password", "-s", Self.service, "-a", Self.account, "-A", "-w"],
-            input: "\(payload)\n\(payload)\n"
-        )
-        guard result.status == 0 else {
-            throw CredentialProjectionError.systemCredentialWriteFailed(result.error)
-        }
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
     }
 
     /// go-keyring 會把內容包成 base64；官方 App 也可能直接存 JSON，兩種都接。
@@ -59,20 +78,15 @@ final class AntigravitySystemCredentialService: Sendable {
         (try? CredentialProjectionService.antigravityTokenFile(from: credential)) ?? credential
     }
 
-    private func run(_ arguments: [String], input: String?) throws -> (status: Int32, error: String) {
+    private func run(_ arguments: [String]) throws -> (status: Int32, error: String) {
         let process = Process()
         let errorPipe = Pipe()
-        let inputPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = arguments
-        process.standardInput = input == nil ? FileHandle.nullDevice : inputPipe
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = errorPipe
         try process.run()
-        if let input {
-            inputPipe.fileHandleForWriting.write(Data(input.utf8))
-            try? inputPipe.fileHandleForWriting.close()
-        }
         let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

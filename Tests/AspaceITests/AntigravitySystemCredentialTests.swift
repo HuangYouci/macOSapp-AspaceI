@@ -52,4 +52,28 @@ struct AntigravitySystemCredentialTests {
         #expect(root["id_token"] != nil)
         #expect(AccountManager.credentialEmail(canonical, platform: .antigravity) == "someone@example.com")
     }
+
+    @Test("access token 空著或 expiry 是 1970 的憑證不得寫出")
+    func rejectsStubToken() throws {
+        let stub = try JSONSerialization.data(withJSONObject: [
+            "auth_method": "consumer",
+            "token": ["access_token": "", "refresh_token": "1//0eA", "token_type": "Bearer", "expiry": "1970-01-01T00:00:00Z"]
+        ])
+        #expect(!CredentialProjectionService.isUsableAntigravityToken(stub))
+
+        let epochOnly = try JSONSerialization.data(withJSONObject: [
+            "auth_method": "consumer",
+            "token": ["access_token": "ya29.sample", "refresh_token": "1//0eA", "token_type": "Bearer", "expiry": "1970-01-01T00:00:00Z"]
+        ])
+        #expect(!CredentialProjectionService.isUsableAntigravityToken(epochOnly))
+
+        #expect(CredentialProjectionService.isUsableAntigravityToken(credential()))
+    }
+
+    @Test("只有 refresh token 的憑證正規化後會被擋下")
+    func rejectsRefreshOnlyCredential() throws {
+        let refreshOnly = try JSONSerialization.data(withJSONObject: ["refresh_token": "1//0eA"])
+        let token = try CredentialProjectionService.antigravityTokenFile(from: refreshOnly)
+        #expect(!CredentialProjectionService.isUsableAntigravityToken(token))
+    }
 }

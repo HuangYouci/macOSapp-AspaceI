@@ -2,7 +2,7 @@
 
 最後更新日期：2026-09-18
 
-對應功能／commit：Antigravity 切換改寫登入 Keychain、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -117,7 +117,17 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 Antigravity 的登入位置隨版本改變，`< 2.0` 在 `state.vscdb`，**`>= 2.0` 在 macOS 登入 Keychain**（service `gemini`、account `antigravity`，內容為 go-keyring 的 `go-keyring-base64:<base64(JSON)>`）。`~/.gemini/jetski-standalone-oauth-token` 只是附帶產物，官方 App 不從那裡讀登入身分。2026-09-18 實測這台 Mac：Antigravity.app 2.14.0，Keychain 內是 A 帳號、jetski 檔案內是 B 帳號，兩者長期不同步——先前只寫檔案的版本切換一律不生效，額度顯示的也是官方 App 已經不在用的那個帳號。判定與封裝形狀比對自 cockpit-tools `antigravity_credential.rs` 與 `commands/account.rs`（`>= 2.0.0` 走 SystemCredential，版本解析不出來時也走這條）。
 
-`AntigravitySystemCredentialService` 負責這個項目：讀用 `SecItemCopyMatching`（官方 App 以「允許所有程式」建立，不跳授權視窗，因此每輪同步也讀得到，不受 `includeKeychain` 限制）；寫必須走 `/usr/bin/security add-generic-password -A`，先刪再加。以 `SecItemAdd` 建立的項目只有 AspaceI 自己能讀，官方 App 會被 Keychain 拒絕而當成沒登入。憑證從 stdin 餵給 `security`（`-w` 不帶值時會要求輸入兩次），不放進行程參數列。`CredentialProjectionService.projectToDefaultClient` 寫 Keychain 成功才算切換成功，jetski 檔案仍然同步寫一份給 Gemini CLI 與舊版用，寫失敗不影響結果。
+`AntigravitySystemCredentialService` 負責這個項目：讀用 `SecItemCopyMatching`（官方 App 以「允許所有程式」建立，不跳授權視窗，因此每輪同步也讀得到，不受 `includeKeychain` 限制）；寫必須走 `/usr/bin/security add-generic-password -A`，先刪再加。以 `SecItemAdd` 建立的項目只有 AspaceI 自己能讀，官方 App 會被 Keychain 拒絕而當成沒登入。憑證只能放在 `-w` 的參數值裡：`-w` 不帶值改由 stdin 讀時，`security` 會在 **128 個字元處無聲截斷**（2026-09-18 實測送 418 字元讀回 128），寫出半截 JSON 把官方 App 的登入弄壞。代價是憑證短暫出現在行程參數列，與 cockpit-tools 相同。
+
+寫入有三道防線，缺一不可——這個項目是官方 App 唯一的登入來源，寫壞就是把使用者登出：
+
+1. **寫出去的憑證必須可用**：`isUsableAntigravityToken` 要求 access token 非空且 expiry 不是 1970 預設值。只有 refresh token 的憑證一律擋下讓切換失敗，不寫半份出去。
+2. **寫完讀回逐位元組比對**：Keychain 寫入不回報長度，不驗就會把截斷當成切換成功。
+3. **失敗還原**：寫入前留住原項目，狀態碼非零或比對不符就放回去。
+
+`CredentialProjectionService.projectToDefaultClient` 的 `writeSystemCredential` 必須可抽換。這個目的地是系統層級的，不隨 `homeDirectory` 改變：2026-09-18 有一次 `swift test` 用預設寫入器把測試用的 `{"refresh_token":"1//r"}` 寫進了開發機上 Antigravity 正在用的登入，測試自己的臨時 home 完全擋不住。凡是寫到 `homeDirectory` 以外的服務，測試都要注入假的寫入器。
+
+jetski 檔案仍然同步寫一份給 Gemini CLI 與舊版用，寫失敗不影響結果。
 
 切換前一定先用 refresh token 換一份可用的 access token（`OAuthService.refreshAntigravity`），連同 `id_token` 與未來的 `expiry` 一起寫進去，換發結果同時寫回 AspaceI 的 Keychain 並把 id_token 裡的 email 補進帳號。只寫 refresh token、access token 留空、expiry 給 1970 的內容不算切換成功：官方 App（Electron）自己保有 Google 登入 session，拿到不能用的憑證會靜默回到原本的帳號。換不到新 token 且手上的 access token 也過期時，直接把換發失敗的原因丟出去讓切換失敗，不寫半份憑證。
 

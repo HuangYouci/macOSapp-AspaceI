@@ -94,17 +94,38 @@ struct DefaultClientProjectionTests {
         }
     }
 
-    @Test("切換 Antigravity 時把各種形狀轉成官方 token 檔")
+    @Test("切換 Antigravity 寫出完整憑證，只有 refresh token 時拒絕")
     func projectsAntigravity() throws {
         let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         defer { try? FileManager.default.removeItem(at: home) }
         let account = Account(platform: .antigravity, displayName: "g")
-        try CredentialProjectionService.shared.projectToDefaultClient(account: account, credentialData: Data(#"{"refresh_token":"1//r"}"#.utf8), homeDirectory: home)
-        let written = try JSONSerialization.jsonObject(with: Data(contentsOf: home.appending(path: ".gemini/jetski-standalone-oauth-token"))) as? [String: Any]
-        let token = try #require(written?["token"] as? [String: Any])
-        #expect(token["refresh_token"] as? String == "1//r")
-        #expect(token["token_type"] as? String == "Bearer")
-        #expect(written?["auth_method"] as? String == "consumer")
+        // 絕不能用預設的寫入器：那會改到這台機器上 Antigravity 正在用的登入 Keychain。
+        var written: [Data] = []
+        let complete = Data(#"{"auth_method":"consumer","token":{"access_token":"ya29.a","refresh_token":"1//r","token_type":"Bearer","expiry":"2099-01-01T00:00:00Z"}}"#.utf8)
+        try CredentialProjectionService.shared.projectToDefaultClient(
+            account: account,
+            credentialData: complete,
+            homeDirectory: home,
+            writeSystemCredential: { written.append($0) }
+        )
+        #expect(written.count == 1)
+        let keychain = try #require(try JSONSerialization.jsonObject(with: written[0]) as? [String: Any])
+        #expect((keychain["token"] as? [String: Any])?["refresh_token"] as? String == "1//r")
+        #expect(keychain["auth_method"] as? String == "consumer")
+        // jetski 檔案仍然同步一份給 Gemini CLI 與舊版。
+        let file = try JSONSerialization.jsonObject(with: try Data(contentsOf: home.appending(path: ".gemini/jetski-standalone-oauth-token"))) as? [String: Any]
+        #expect((file?["token"] as? [String: Any])?["access_token"] as? String == "ya29.a")
+
+        // 只有 refresh token 時會被擋下，而且不碰任何目的地。
+        #expect(throws: CredentialProjectionError.self) {
+            try CredentialProjectionService.shared.projectToDefaultClient(
+                account: account,
+                credentialData: Data(#"{"refresh_token":"1//r"}"#.utf8),
+                homeDirectory: home,
+                writeSystemCredential: { written.append($0) }
+            )
+        }
+        #expect(written.count == 1)
     }
 
     @Test("Claude 與 Copilot 不支援切換")
