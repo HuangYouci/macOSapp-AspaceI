@@ -93,7 +93,12 @@ final class CredentialImportService: Sendable {
         return ImportedCredential(platform: .githubCopilot, displayName: PlatformKind.githubCopilot.displayName, sourcePath: file.path, data: data)
     }
 
+    /// 不受 `includeKeychain` 限制：Antigravity 2.0 起登入就放在這個項目，它由官方 App 以「允許所有程式」
+    /// 建立，讀取不會跳授權視窗，等同於讀檔案。少了它，每輪同步拿到的是官方 App 已經不用的 jetski 檔案。
     private func importedAntigravity(tokenFile: URL, database: URL) -> ImportedCredential? {
+        if let data = AntigravitySystemCredentialService.shared.load(), !data.isEmpty {
+            return ImportedCredential(platform: .antigravity, displayName: PlatformKind.antigravity.displayName, sourcePath: "macOS Keychain", data: data)
+        }
         if let data = nonemptyData(at: tokenFile) {
             return ImportedCredential(platform: .antigravity, displayName: PlatformKind.antigravity.displayName, sourcePath: tokenFile.path, data: data)
         }

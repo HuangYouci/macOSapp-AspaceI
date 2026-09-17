@@ -35,9 +35,13 @@ final class CredentialProjectionService: Sendable {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try write(credentialData, to: directory.appending(path: "auth.json"))
         case .antigravity:
+            // Antigravity 2.0 起讀的是登入 Keychain，不是 jetski 檔案；只寫檔案的話官方 App 會照舊用原本的帳號。
+            let token = try Self.antigravityTokenFile(from: credentialData)
+            try AntigravitySystemCredentialService.shared.save(token)
+            // 檔案仍然要同步，Gemini CLI 與舊版 Antigravity 從這裡讀；寫失敗不影響切換結果。
             let directory = homeDirectory.appending(path: ".gemini", directoryHint: .isDirectory)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try write(try Self.antigravityTokenFile(from: credentialData), to: directory.appending(path: "jetski-standalone-oauth-token"))
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try? write(token, to: directory.appending(path: "jetski-standalone-oauth-token"))
         case .claude, .githubCopilot:
             throw CredentialProjectionError.switchUnsupported
         }
@@ -81,8 +85,11 @@ final class CredentialProjectionService: Sendable {
 
 enum CredentialProjectionError: LocalizedError {
     case credentialMissing, sourceMissing, antigravityProfileRequired, incompleteCredential, switchUnsupported
+    case systemCredentialWriteFailed(String)
     var errorDescription: String? {
         switch self {
+        case .systemCredentialWriteFailed(let message):
+            message.isEmpty ? "無法寫入 Antigravity 的登入 Keychain" : "無法寫入 Antigravity 的登入 Keychain：\(message)"
         case .credentialMissing: "Keychain 中找不到此帳號的憑證"
         case .sourceMissing: "原始登入資料已不存在"
         case .antigravityProfileRequired: "Antigravity Instance 需綁定 state.vscdb 帳號快照"

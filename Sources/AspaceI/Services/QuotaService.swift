@@ -84,32 +84,38 @@ final class QuotaService: Sendable {
         return token
     }
 
-    static func parseAntigravityQuota(_ value: [String: Any]) throws -> QuotaSnapshot {
+    static func parseAntigravityQuota(_ value: [String: Any], now: Date = .now) throws -> QuotaSnapshot {
         let groups = value["groups"] as? [[String: Any]] ?? []
-        let mainIndex = groups.firstIndex { group in
+        // 找不到 Gemini 群組就不顯示。退回第一個群組會把 Claude／GPT（`3p-*`）的數字掛到 Gemini 欄位上。
+        guard let group = groups.first(where: { group in
             (group["buckets"] as? [[String: Any]] ?? []).contains { ($0["bucketId"] as? String)?.hasPrefix("gemini") == true }
-        } ?? 0
+        }) else { throw QuotaError.invalidResponse }
         var windows: [QuotaWindow] = []
-        for (index, group) in groups.enumerated() where index == mainIndex {
-            for bucket in group["buckets"] as? [[String: Any]] ?? [] {
-                guard let id = bucket["bucketId"] as? String,
-                      let fraction = bucket["remainingFraction"] as? NSNumber,
-                      bucket["disabled"] as? Bool != true else { continue }
-                let kind: QuotaWindow.Kind = switch bucket["window"] as? String ?? "" {
-                case "5h": .fiveHour
-                case "weekly": .week
-                default: id.hasSuffix("5h") ? .fiveHour : id.hasSuffix("weekly") ? .week : .other
-                }
-                guard kind != .other else { continue }
-                let reset = (bucket["resetTime"] as? String).flatMap(parseISODate)
-                windows.append(QuotaWindow(
-                    id: id,
-                    title: kind.shortTitle,
-                    remainingPercentage: Int((fraction.doubleValue * 100).rounded()),
-                    resetsAt: reset,
-                    kind: kind
-                ))
+        for bucket in group["buckets"] as? [[String: Any]] ?? [] {
+            guard let id = bucket["bucketId"] as? String,
+                  let fraction = bucket["remainingFraction"] as? NSNumber,
+                  bucket["disabled"] as? Bool != true else { continue }
+            let kind: QuotaWindow.Kind = switch bucket["window"] as? String ?? "" {
+            case "5h": .fiveHour
+            case "weekly": .week
+            default: id.hasSuffix("5h") ? .fiveHour : id.hasSuffix("weekly") ? .week : .other
             }
+            guard kind != .other else { continue }
+            var percentage = Int((fraction.doubleValue * 100).rounded())
+            var reset = (bucket["resetTime"] as? String).flatMap(parseISODate)
+            // 週限額用完時，5h 桶會回週的重置時間與被壓住的比例。這時 5h 本身其實沒被用掉，
+            // 照抄會讓「段」欄倒數好幾天。判定沿用 cockpit-tools 的 `getAntigravityQuotaDisplayItems`。
+            if kind == .fiveHour, let resetsAt = reset, resetsAt.timeIntervalSince(now) > 5 * 3_600 {
+                percentage = 100
+                reset = nil
+            }
+            windows.append(QuotaWindow(
+                id: id,
+                title: kind.shortTitle,
+                remainingPercentage: percentage,
+                resetsAt: reset,
+                kind: kind
+            ))
         }
         guard !windows.isEmpty else { throw QuotaError.invalidResponse }
         return QuotaSnapshot(windows: windows, fetchedAt: .now)

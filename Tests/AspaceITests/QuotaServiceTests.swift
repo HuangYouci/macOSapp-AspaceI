@@ -95,6 +95,59 @@ struct QuotaServiceTests {
         #expect(result.windows.map(\.id).sorted() == ["gemini-5h", "gemini-weekly"])
     }
 
+    @Test("找不到 Gemini 群組時不退回第一個群組")
+    func rejectsAntigravityQuotaWithoutGeminiGroup() {
+        #expect(throws: QuotaError.self) {
+            try QuotaService.parseAntigravityQuota([
+                "groups": [
+                    [
+                        "displayName": "Claude and GPT models",
+                        "buckets": [
+                            ["bucketId": "3p-weekly", "window": "weekly", "remainingFraction": 0.42],
+                            ["bucketId": "3p-5h", "window": "5h", "remainingFraction": 0.77]
+                        ]
+                    ]
+                ]
+            ])
+        }
+    }
+
+    @Test("5h 桶回週的重置時間時視為未使用，不顯示倒數")
+    func normalisesAntigravityFiveHourCappedByWeekly() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let weeklyReset = ISO8601DateFormatter().string(from: now.addingTimeInterval(72 * 3_600))
+        let result = try QuotaService.parseAntigravityQuota([
+            "groups": [
+                [
+                    "buckets": [
+                        ["bucketId": "gemini-weekly", "window": "weekly", "remainingFraction": 0, "resetTime": weeklyReset],
+                        ["bucketId": "gemini-5h", "window": "5h", "remainingFraction": 0, "resetTime": weeklyReset]
+                    ]
+                ]
+            ]
+        ], now: now)
+        let fiveHour = try #require(result.windows.first { $0.kind == .fiveHour })
+        #expect(fiveHour.remainingPercentage == 100)
+        #expect(fiveHour.resetsAt == nil)
+        let week = try #require(result.windows.first { $0.kind == .week })
+        #expect(week.remainingPercentage == 0)
+        #expect(week.resetsAt != nil)
+    }
+
+    @Test("5h 桶的重置時間在五小時內時照實顯示")
+    func keepsAntigravityFiveHourWithinWindow() throws {
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let reset = ISO8601DateFormatter().string(from: now.addingTimeInterval(3_600))
+        let result = try QuotaService.parseAntigravityQuota([
+            "groups": [
+                ["buckets": [["bucketId": "gemini-5h", "window": "5h", "remainingFraction": 0.25, "resetTime": reset]]]
+            ]
+        ], now: now)
+        let fiveHour = try #require(result.windows.first { $0.kind == .fiveHour })
+        #expect(fiveHour.remainingPercentage == 25)
+        #expect(fiveHour.resetsAt != nil)
+    }
+
     @Test("不支援的時窗長度不顯示")
     func dropsUnsupportedCodexWindow() throws {
         let result = try QuotaService.parseCodexQuota([
