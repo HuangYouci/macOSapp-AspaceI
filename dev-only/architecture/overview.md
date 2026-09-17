@@ -22,7 +22,7 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 | :--- | :--- | :--- |
 | Codex | `chatgpt.com/backend-api/wham/usage` | `primary_window`／`secondary_window` 依 `limit_window_seconds` 判定；Pro 等方案可能只有 7d |
 | Claude | `api.anthropic.com/api/oauth/usage` | `five_hour`、`seven_day` |
-| Antigravity | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` | 只取 Gemini 群組的 5h／7d；Claude/GPT 群組不提供；`disabled` 時窗略過。找不到 Gemini 群組就整筆丟棄，不退回第一個群組（否則會把 `3p-*` 的數字掛到 Gemini 欄位）。週限額用完時 5h 桶會回週的重置時間與被壓住的比例，`resetTime` 距今超過五小時就視為 5h 未使用：顯示 100% 且不顯示倒數（判定沿用 cockpit-tools `getAntigravityQuotaDisplayItems`） |
+| Antigravity | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` | 只取 Gemini 群組的 5h／7d；Claude/GPT 群組不提供；`disabled` 時窗略過。找不到 Gemini 群組就整筆丟棄，不退回第一個群組（否則會把 `3p-*` 的數字掛到 Gemini 欄位）。週限額用完時 5h 桶會回週的重置時間與被壓住的比例，此時視為 5h 未使用：顯示 100% 且不顯示倒數。判定沿用 cockpit-tools `getAntigravityQuotaDisplayItems`，但多要求 5h 的重置時間不早於週的——沒用過的 5h 視窗本來就回「現在 + 5 小時」，單看「距今超過五小時」會在邊界誤判而抹掉還在走的倒數（2026-09-18 實測：5h 重置 5.08 小時後、週重置 6.2 小時後，兩個都還沒被壓住） |
 | GitHub Copilot | `api.github.com/copilot_internal/user` | 每月重置；有 premium 額度時取 `premium_interactions`，免費方案退回 `chat` |
 
 額度每五分鐘在背景更新；失敗時保留最後一次成功快取並於帳號列顯示狀態。同一時間只跑一輪（期間再被呼叫就排到下一輪），避免兩輪同時換發輪替式 refresh token。

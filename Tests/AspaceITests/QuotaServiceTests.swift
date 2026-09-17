@@ -134,6 +134,30 @@ struct QuotaServiceTests {
         #expect(week.resetsAt != nil)
     }
 
+    @Test("沒用過的 5h 視窗剛好超過五小時時仍保留倒數")
+    func keepsFreshAntigravityFiveHourBeyondThreshold() throws {
+        // 2026-09-18 的真實回應：5h 重置在 5.08 小時後、週重置在 6.2 小時後，兩個都還沒被壓住。
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let iso = ISO8601DateFormatter()
+        let result = try QuotaService.parseAntigravityQuota([
+            "groups": [
+                [
+                    "buckets": [
+                        ["bucketId": "gemini-weekly", "window": "weekly", "remainingFraction": 0.20294766,
+                         "resetTime": iso.string(from: now.addingTimeInterval(6.2 * 3_600))],
+                        ["bucketId": "gemini-5h", "window": "5h", "remainingFraction": 1,
+                         "resetTime": iso.string(from: now.addingTimeInterval(5.08 * 3_600))]
+                    ]
+                ]
+            ]
+        ], now: now)
+        let fiveHour = try #require(result.windows.first { $0.kind == .fiveHour })
+        #expect(fiveHour.remainingPercentage == 100)
+        #expect(fiveHour.resetsAt != nil)
+        let week = try #require(result.windows.first { $0.kind == .week })
+        #expect(week.remainingPercentage == 20)
+    }
+
     @Test("5h 桶的重置時間在五小時內時照實顯示")
     func keepsAntigravityFiveHourWithinWindow() throws {
         let now = Date(timeIntervalSince1970: 1_789_000_000)

@@ -101,24 +101,38 @@ final class QuotaService: Sendable {
             default: id.hasSuffix("5h") ? .fiveHour : id.hasSuffix("weekly") ? .week : .other
             }
             guard kind != .other else { continue }
-            var percentage = Int((fraction.doubleValue * 100).rounded())
-            var reset = (bucket["resetTime"] as? String).flatMap(parseISODate)
-            // 週限額用完時，5h 桶會回週的重置時間與被壓住的比例。這時 5h 本身其實沒被用掉，
-            // 照抄會讓「段」欄倒數好幾天。判定沿用 cockpit-tools 的 `getAntigravityQuotaDisplayItems`。
-            if kind == .fiveHour, let resetsAt = reset, resetsAt.timeIntervalSince(now) > 5 * 3_600 {
-                percentage = 100
-                reset = nil
-            }
             windows.append(QuotaWindow(
                 id: id,
                 title: kind.shortTitle,
-                remainingPercentage: percentage,
-                resetsAt: reset,
+                remainingPercentage: Int((fraction.doubleValue * 100).rounded()),
+                resetsAt: (bucket["resetTime"] as? String).flatMap(parseISODate),
                 kind: kind
             ))
         }
         guard !windows.isEmpty else { throw QuotaError.invalidResponse }
-        return QuotaSnapshot(windows: windows, fetchedAt: .now)
+        return QuotaSnapshot(windows: Self.normalisingCappedFiveHour(windows, now: now), fetchedAt: .now)
+    }
+
+    /// 週限額用完時，5h 桶會回週的重置時間與被壓住的比例，照抄會讓「段」欄倒數好幾天。
+    /// 判定沿用 cockpit-tools 的 `getAntigravityQuotaDisplayItems`，但多要求 5h 的重置時間不早於週的：
+    /// 沒用過的 5h 視窗本來就會回「現在 + 5 小時」，單看「距今超過五小時」會在邊界上誤判，
+    /// 把還在走的倒數抹掉（2026-09-18 實測：5h 重置 5.08 小時後、週重置 6.2 小時後，兩個都還沒被壓住）。
+    static func normalisingCappedFiveHour(_ windows: [QuotaWindow], now: Date) -> [QuotaWindow] {
+        guard let weeklyReset = windows.first(where: { $0.kind == .week })?.resetsAt else { return windows }
+        return windows.map { window in
+            guard window.kind == .fiveHour,
+                  let resetsAt = window.resetsAt,
+                  resetsAt.timeIntervalSince(now) > 5 * 3_600,
+                  resetsAt >= weeklyReset else { return window }
+            return QuotaWindow(
+                id: window.id,
+                title: window.title,
+                remainingPercentage: 100,
+                resetsAt: nil,
+                kind: window.kind,
+                group: window.group
+            )
+        }
     }
 
     // MARK: Codex
