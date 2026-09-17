@@ -1,8 +1,8 @@
 # 本機憑證匯入
 
-最後更新日期：2026-09-13
+最後更新日期：2026-09-18
 
-對應功能／commit：四平台自動匯入、Antigravity refresh token 換發、帳號去重
+對應功能／commit：四平台自動匯入、Antigravity refresh token 換發、帳號去重、Antigravity 2.0 登入 Keychain
 
 ## 參考與決策
 
@@ -11,13 +11,13 @@
 - Codex：先讀 `~/.codex/auth.json`，不存在時讀取 `Codex Auth` Keychain 項目。
 - Claude：先讀取 `Claude Code-credentials` Keychain 項目，再回退至 `~/.claude/.credentials.json`。
 - GitHub：透過官方 `gh auth token` 取得目前 GitHub CLI token，再回退至 `~/.config/gh/hosts.yml`。
-- Antigravity：先讀新版獨立 App 的 `~/.gemini/jetski-standalone-oauth-token`（JSON，含 `token.refresh_token`），不存在時唯讀查詢 Antigravity IDE 的 `state.vscdb` 的 `antigravityUnifiedStateSync.oauthToken`，解析 protobuf 取得 refresh token。
+- Antigravity：**先讀登入 Keychain 的 `gemini`／`antigravity` 項目**（Antigravity 2.0 起的登入位置，go-keyring `go-keyring-base64:` 包裝的 JSON），再回退 `~/.gemini/jetski-standalone-oauth-token`，最後唯讀查詢 Antigravity IDE 的 `state.vscdb` 的 `antigravityUnifiedStateSync.oauthToken`，解析 protobuf 取得 refresh token。順序不能顛倒：jetski 檔案可能停留在很久以前的帳號，讀它會讓 AspaceI 以為官方 App 在用另一個人。
 
-每個平台只保留一個「本機匯入」帳號（`Account.origin == .local`），重新匯入時覆寫同一筆；手動加入與檔案匯入不參與去重。舊資料沒有 `origin` 時依 `sourcePath` 推斷，載入時收斂重複的本機帳號並刪除多餘的 Keychain 項目。
+每個平台只保留一個「本機匯入」帳號（`Account.origin == .local`），重新匯入時覆寫同一筆。手動加入與檔案匯入不依 `sourcePath` 去重，但同平台同 email 一律合併到既有帳號（含本機匯入的那筆，合併後保留 `.local`）。舊資料沒有 `origin` 時依 `sourcePath` 推斷，載入時收斂重複的本機帳號並刪除多餘的 Keychain 項目。
 
 ## 安全邊界
 
-匯入資料只在記憶體短暫存在，隨即寫入 AspaceI Keychain。一般帳號資料只保存 Keychain reference，不保存 token。外部 Keychain 項目可能觸發 macOS 權限提示；拒絕後視為未找到，不嘗試繞過。
+匯入資料只在記憶體短暫存在，隨即寫入 AspaceI Keychain。一般帳號資料只保存 Keychain reference，不保存 token。外部 Keychain 項目可能觸發 macOS 權限提示；拒絕後視為未找到，不嘗試繞過。Antigravity 的 `gemini`／`antigravity` 項目由官方 App 以「允許所有程式」建立，讀寫都不跳提示；寫入時憑證從 stdin 餵給 `/usr/bin/security`，不放進行程參數列。
 
 ## Antigravity 換發 access token（2026-09-13 決策變更）
 

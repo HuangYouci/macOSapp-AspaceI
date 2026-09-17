@@ -1,8 +1,8 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-09-16
+最後更新日期：2026-09-18
 
-對應功能／commit：popup 二次確認改為自繪覆蓋卡片、額度重置倒數、官方檔案同步的帳號歸屬判斷、切換 Antigravity 前換發完整 token
+對應功能／commit：Antigravity 切換改寫登入 Keychain、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -22,7 +22,7 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 | :--- | :--- | :--- |
 | Codex | `chatgpt.com/backend-api/wham/usage` | `primary_window`／`secondary_window` 依 `limit_window_seconds` 判定；Pro 等方案可能只有 7d |
 | Claude | `api.anthropic.com/api/oauth/usage` | `five_hour`、`seven_day` |
-| Antigravity | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` | 只取 Gemini 群組的 5h／7d；Claude/GPT 群組不提供；`disabled` 時窗略過 |
+| Antigravity | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` | 只取 Gemini 群組的 5h／7d；Claude/GPT 群組不提供；`disabled` 時窗略過。找不到 Gemini 群組就整筆丟棄，不退回第一個群組（否則會把 `3p-*` 的數字掛到 Gemini 欄位）。週限額用完時 5h 桶會回週的重置時間與被壓住的比例，`resetTime` 距今超過五小時就視為 5h 未使用：顯示 100% 且不顯示倒數（判定沿用 cockpit-tools `getAntigravityQuotaDisplayItems`） |
 | GitHub Copilot | `api.github.com/copilot_internal/user` | 每月重置；有 premium 額度時取 `premium_interactions`，免費方案退回 `chat` |
 
 額度每五分鐘在背景更新；失敗時保留最後一次成功快取並於帳號列顯示狀態。同一時間只跑一輪（期間再被呼叫就排到下一輪），避免兩輪同時換發輪替式 refresh token。
@@ -75,7 +75,7 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 | Claude | PKCE，官方手動回呼頁 | 使用者把頁面上的 `code#state` 貼回 App |
 | GitHub Copilot | Device flow（Copilot GitHub App client） | 輪詢；使用者碼自動複製並開啟驗證頁 |
 
-OAuth 取得的憑證寫成各官方客戶端的原生格式（Codex `auth.json`、Claude Code `.credentials.json`、Antigravity `jetski-standalone-oauth-token`），因此可直接投影到實例或官方客戶端。Antigravity 另外保留回應中的 `id_token`，它同時是官方檔案的登入身分與 AspaceI 判斷憑證屬於誰的依據。同平台同 email 的帳號視為同一人，重新登入時覆寫憑證。
+OAuth 取得的憑證寫成各官方客戶端的原生格式（Codex `auth.json`、Claude Code `.credentials.json`、Antigravity `jetski-standalone-oauth-token`），因此可直接投影到實例或官方客戶端。Antigravity 另外保留回應中的 `id_token`，它同時是官方檔案的登入身分與 AspaceI 判斷憑證屬於誰的依據。同平台同 email 的帳號視為同一人，重新登入時覆寫憑證；本機匯入的帳號也算在內，合併時保留 `origin == .local`（換新仍由官方客戶端負責）。先前排除 `.local` 會讓同一個 Google 帳號變成兩列、額度數字一模一樣，互相切換看起來沒作用。
 
 ### Token 輪替
 
@@ -89,7 +89,7 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 - Token 與 refresh token 只存入 macOS Keychain，而且集中成單一項目（service `com.huangyouci.AspaceI`、account `credentials-vault`，內容為 reference → 憑證的 JSON），啟動後讀一次並快取在記憶體。macOS 對每個項目各自要求授權，分散存放時帳號越多跳越多次。舊版每帳號一個項目的資料在第一次讀到時併入並刪除。
 - `build-app.sh` 優先使用本機的 Apple Development／Developer ID 簽章。Keychain 依簽章判斷是否為同一個 App；ad-hoc 簽章每次建置都會變，導致「永遠允許」失效而反覆詢問。
-- 啟動時的自動匯入只讀檔案（`~/.codex/auth.json`、`~/.claude/.credentials.json`、Antigravity token 檔、`gh auth token`），不讀其他 App 的 Keychain 項目；那些只在使用者按「本機偵測」時讀取。
+- 啟動時的自動匯入只讀檔案（`~/.codex/auth.json`、`~/.claude/.credentials.json`、`gh auth token`），不讀其他 App 的 Keychain 項目；那些只在使用者按「本機偵測」時讀取。Antigravity 的 `gemini`／`antigravity` 項目是例外，它就是官方 App 現行的登入位置，而且讀取不跳授權視窗，等同於讀檔案。
 - 一般 JSON 僅保存帳號識別資訊、平台、方案、額度快取及重置時間。
 - Log 不得包含 token、Authorization header、Cookie 或原始登入檔案內容。
 - GitHub 使用官方 `gh auth token` 從系統 Keychain 取值，轉存時只寫入 AspaceI Keychain；啟動綁定 Instance 時以環境變數注入。
@@ -115,7 +115,11 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 「切換」＝把預設實例（官方 App）換成這個帳號，目前只支援 Codex（寫 `~/.codex/auth.json`，需要完整 tokens）與 Antigravity（寫 `~/.gemini/jetski-standalone-oauth-token`）。
 
-Antigravity 切換前一定先用 refresh token 換一份可用的 access token（`OAuthService.refreshAntigravity`），連同 `id_token` 與未來的 `expiry` 一起寫進官方檔案，換發結果同時寫回 Keychain 並把 id_token 裡的 email 補進帳號。只寫 refresh token、access token 留空、expiry 給 1970 的檔案不算切換成功：官方 App（Electron）自己保有 Google 登入 session，拿到不能用的憑證會靜默回到原本的帳號，再把檔案改寫回去。換不到新 token 且手上的 access token 也過期時，直接讓切換失敗，不寫半份檔案。
+Antigravity 的登入位置隨版本改變，`< 2.0` 在 `state.vscdb`，**`>= 2.0` 在 macOS 登入 Keychain**（service `gemini`、account `antigravity`，內容為 go-keyring 的 `go-keyring-base64:<base64(JSON)>`）。`~/.gemini/jetski-standalone-oauth-token` 只是附帶產物，官方 App 不從那裡讀登入身分。2026-09-18 實測這台 Mac：Antigravity.app 2.14.0，Keychain 內是 A 帳號、jetski 檔案內是 B 帳號，兩者長期不同步——先前只寫檔案的版本切換一律不生效，額度顯示的也是官方 App 已經不在用的那個帳號。判定與封裝形狀比對自 cockpit-tools `antigravity_credential.rs` 與 `commands/account.rs`（`>= 2.0.0` 走 SystemCredential，版本解析不出來時也走這條）。
+
+`AntigravitySystemCredentialService` 負責這個項目：讀用 `SecItemCopyMatching`（官方 App 以「允許所有程式」建立，不跳授權視窗，因此每輪同步也讀得到，不受 `includeKeychain` 限制）；寫必須走 `/usr/bin/security add-generic-password -A`，先刪再加。以 `SecItemAdd` 建立的項目只有 AspaceI 自己能讀，官方 App 會被 Keychain 拒絕而當成沒登入。憑證從 stdin 餵給 `security`（`-w` 不帶值時會要求輸入兩次），不放進行程參數列。`CredentialProjectionService.projectToDefaultClient` 寫 Keychain 成功才算切換成功，jetski 檔案仍然同步寫一份給 Gemini CLI 與舊版用，寫失敗不影響結果。
+
+切換前一定先用 refresh token 換一份可用的 access token（`OAuthService.refreshAntigravity`），連同 `id_token` 與未來的 `expiry` 一起寫進去，換發結果同時寫回 AspaceI 的 Keychain 並把 id_token 裡的 email 補進帳號。只寫 refresh token、access token 留空、expiry 給 1970 的內容不算切換成功：官方 App（Electron）自己保有 Google 登入 session，拿到不能用的憑證會靜默回到原本的帳號。換不到新 token 且手上的 access token 也過期時，直接把換發失敗的原因丟出去讓切換失敗，不寫半份憑證。
 
 比對過 cockpit-tools（2026-09-13 的資料目錄）：它每個 Antigravity 帳號只存 `email` 與 `refresh_token`，沒有任何 access token 或 IDE 狀態快照，所以切換當下必然是自己去換 token。實測該 refresh token 仍可換到帶 `openid` scope 的回應（含 `id_token`），因此 AspaceI 的授權 scope 也補上 `openid`，自己登入的帳號才拿得到 id_token。這台 Mac 上現行的 Antigravity 把登入放在 `~/.gemini/jetski-standalone-oauth-token`，Application Support 內沒有 `state.vscdb`（舊版 Antigravity IDE 才有）。Claude Desktop、VS Code 的登入存在各自加密的儲存區，只能「設為目前帳號」（僅影響 AspaceI 內的粗體標示）。
 

@@ -58,12 +58,14 @@ final class AccountManager {
         // 官方 App 讀的是可用的 access token，切換前先換一份完整憑證；換不到就用手上這份試。
         var data = stored
         if account.platform == .antigravity {
-            if let refreshed = try? await OAuthService.shared.refreshAntigravity(stored) {
+            do {
+                let refreshed = try await OAuthService.shared.refreshAntigravity(stored)
                 data = refreshed
                 try keychainService.save(refreshed, account: reference)
                 adoptIdentity(from: refreshed, for: account)
-            } else if !Self.antigravityTokenUsable(stored) {
-                throw QuotaError.tokenExpired
+            } catch {
+                // 手上的 access token 還沒過期就照舊寫出去，過期了就把換發失敗的原因帶出去，不寫半份憑證。
+                guard Self.antigravityTokenUsable(stored) else { throw error }
             }
         }
         try CredentialProjectionService.shared.projectToDefaultClient(account: account, credentialData: data)
@@ -267,7 +269,10 @@ final class AccountManager {
         }
     }
 
-    /// 同平台同 email 的帳號視為同一人，覆寫憑證而不重複新增。
+    /// 同平台同 email 的帳號視為同一人，覆寫憑證而不重複新增。本機匯入的帳號也算在內：
+    /// 同一個 Google／OpenAI 帳號在官方客戶端登入過、又在 AspaceI 用瀏覽器登入一次，
+    /// 排除 `.local` 會讓它變成兩列、額度數字一模一樣，而且互相切換看起來沒作用。
+    /// 合併到 `.local` 那列時保留 `.local`，官方客戶端仍然負責換新 token。
     private func storeAccount(
         platform: PlatformKind,
         displayName: String,
@@ -279,7 +284,7 @@ final class AccountManager {
     ) async {
         do {
             let existing = email.flatMap { email in
-                accounts.firstIndex { $0.platform == platform && $0.origin != .local && $0.email?.caseInsensitiveCompare(email) == .orderedSame }
+                accounts.firstIndex { $0.platform == platform && $0.email?.caseInsensitiveCompare(email) == .orderedSame }
             }
             let id = existing.map { accounts[$0].id } ?? UUID()
             let reference = "\(platform.rawValue).\(id.uuidString)"
@@ -287,7 +292,7 @@ final class AccountManager {
             if let existing {
                 accounts[existing].credentialReference = reference
                 accounts[existing].sourcePath = sourcePath
-                accounts[existing].origin = origin
+                if accounts[existing].origin != .local { accounts[existing].origin = origin }
                 accounts[existing].lastError = nil
             } else {
                 accounts.append(Account(

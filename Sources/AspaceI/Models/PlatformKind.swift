@@ -50,8 +50,7 @@ enum PlatformKind: String, Codable, CodingKeyRepresentable, CaseIterable, Identi
     /// 除了檔案，官方客戶端也可能只把登入資料放在 Keychain。
     var hasKeychainLocalSource: Bool {
         switch self {
-        case .codex, .claude, .githubCopilot: true
-        case .antigravity: false
+        case .codex, .claude, .githubCopilot, .antigravity: true
         }
     }
 
