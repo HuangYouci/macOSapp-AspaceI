@@ -449,6 +449,7 @@ final class AccountManager {
                 accounts[index].quota = snapshot
                 if let identity = snapshot.identity { accounts[index].email = identity }
                 if let plan = snapshot.plan { accounts[index].planName = plan }
+                if let tierID = snapshot.tierID { accounts[index].tierID = tierID }
                 accounts[index].lastError = nil
             } catch is CancellationError {
                 return

@@ -10,6 +10,8 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     var displayName: String
     var email: String?
     var planName: String?
+    /// Antigravity 的原始 tier id（例如 `g1-pro-tier`、`standard-tier`），決定要問哪個 cloud code 後端。
+    var tierID: String?
     var credentialReference: String?
     var quota: QuotaSnapshot?
     var lastError: String?
@@ -29,6 +31,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         displayName: String,
         email: String? = nil,
         planName: String? = nil,
+        tierID: String? = nil,
         credentialReference: String? = nil,
         quota: QuotaSnapshot? = nil,
         lastError: String? = nil,
@@ -41,6 +44,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         self.displayName = displayName
         self.email = email
         self.planName = planName
+        self.tierID = tierID
         self.credentialReference = credentialReference
         self.quota = quota
         self.lastError = lastError
@@ -50,7 +54,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, platform, displayName, email, planName, credentialReference, quota, lastError, sourcePath, isActive, origin
+        case id, platform, displayName, email, planName, tierID, credentialReference, quota, lastError, sourcePath, isActive, origin
     }
 
     init(from decoder: Decoder) throws {
@@ -60,6 +64,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         displayName = try container.decode(String.self, forKey: .displayName)
         email = try container.decodeIfPresent(String.self, forKey: .email)
         planName = try container.decodeIfPresent(String.self, forKey: .planName)
+        tierID = try container.decodeIfPresent(String.self, forKey: .tierID)
         credentialReference = try container.decodeIfPresent(String.self, forKey: .credentialReference)
         quota = try container.decodeIfPresent(QuotaSnapshot.self, forKey: .quota)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)

@@ -238,4 +238,25 @@ struct PlanParsingTests {
         #expect(OAuthService.codexNeedsRefresh(try credential(nil), now: now))
         #expect(!OAuthService.codexNeedsRefresh(Data(#"{"access_token":"a"}"#.utf8), now: now))
     }
+
+    @Test("消費者方案與 gmail 帳號走 daily 後端，GCP ToS 走 prod")
+    func resolvesAntigravityHost() {
+        let daily = QuotaService.antigravityDailyHost
+        let prod = QuotaService.antigravityProdHost
+        // 問錯後端不會報錯，只會回一份永遠 100% 的額度，所以預設一律 daily。
+        #expect(QuotaService.antigravityHost(tierID: nil, email: nil) == daily)
+        #expect(QuotaService.antigravityHost(tierID: "g1-pro-tier", email: "a@example.com") == daily)
+        #expect(QuotaService.antigravityHost(tierID: "free-tier", email: "a@example.com") == daily)
+        #expect(QuotaService.antigravityHost(tierID: "standard-tier", email: "a@corp.com") == prod)
+        // gmail／googlemail 一律不是 GCP ToS，即使 tier 對得上。
+        #expect(QuotaService.antigravityHost(tierID: "standard-tier", email: "a@gmail.com") == daily)
+        #expect(QuotaService.antigravityHost(tierID: "standard-tier", email: "A@GoogleMail.com") == daily)
+    }
+
+    @Test("tier id 取付費方案優先")
+    func parsesAntigravityTierID() {
+        #expect(QuotaService.parseAntigravityTierID(["paidTier": ["id": "g1-pro-tier"], "currentTier": ["id": "free-tier"]]) == "g1-pro-tier")
+        #expect(QuotaService.parseAntigravityTierID(["currentTier": ["id": "free-tier"]]) == "free-tier")
+        #expect(QuotaService.parseAntigravityTierID([:]) == nil)
+    }
 }

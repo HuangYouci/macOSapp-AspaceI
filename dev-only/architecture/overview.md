@@ -22,8 +22,20 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 | :--- | :--- | :--- |
 | Codex | `chatgpt.com/backend-api/wham/usage` | `primary_window`／`secondary_window` 依 `limit_window_seconds` 判定；Pro 等方案可能只有 7d |
 | Claude | `api.anthropic.com/api/oauth/usage` | `five_hour`、`seven_day` |
-| Antigravity | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` | 只取 Gemini 群組的 5h／7d；Claude/GPT 群組不提供；`disabled` 時窗略過。找不到 Gemini 群組就整筆丟棄，不退回第一個群組（否則會把 `3p-*` 的數字掛到 Gemini 欄位）。週限額用完時 5h 桶會回週的重置時間與被壓住的比例，此時視為 5h 未使用：顯示 100% 且不顯示倒數。判定沿用 cockpit-tools `getAntigravityQuotaDisplayItems`，但多要求 5h 的重置時間不早於週的——沒用過的 5h 視窗本來就回「現在 + 5 小時」，單看「距今超過五小時」會在邊界誤判而抹掉還在走的倒數（2026-09-18 實測：5h 重置 5.08 小時後、週重置 6.2 小時後，兩個都還沒被壓住） |
+| Antigravity | `<host>/v1internal:retrieveUserQuotaSummary`，host 見下 | 只取 Gemini 群組的 5h／7d；Claude/GPT 群組不提供；`disabled` 時窗略過。找不到 Gemini 群組就整筆丟棄，不退回第一個群組（否則會把 `3p-*` 的數字掛到 Gemini 欄位）。週限額用完時 5h 桶會回週的重置時間與被壓住的比例，此時視為 5h 未使用：顯示 100% 且不顯示倒數。判定沿用 cockpit-tools `getAntigravityQuotaDisplayItems`，但多要求 5h 的重置時間不早於週的——沒用過的 5h 視窗本來就回「現在 + 5 小時」，單看「距今超過五小時」會在邊界誤判而抹掉還在走的倒數（2026-09-18 實測：5h 重置 5.08 小時後、週重置 6.2 小時後，兩個都還沒被壓住） |
 | GitHub Copilot | `api.github.com/copilot_internal/user` | 每月重置；有 premium 額度時取 `premium_interactions`，免費方案退回 `chat` |
+
+#### Antigravity 的後端有兩個
+
+`cloudcode-pa.googleapis.com`（prod）只服務 GCP ToS 帳號；其餘（含所有消費者方案）的使用量記在
+`daily-cloudcode-pa.googleapis.com`。**問錯後端不會報錯**，只會回一份沒有任何使用紀錄的額度：
+所有桶都是 100%，`resetTime` 是「現在 + 視窗長度」。2026-09-18 實測同一個 token 同時打兩個 host，
+prod 回 100%／100%，daily 回 87%／21%，後者才和官方 App 畫面一致。
+
+判定沿用 cockpit-tools 的 `resolve_cloud_code_base_url` 與 `create_oauth_info_with_metadata`：
+`standard-tier` 走 prod，其餘走 daily；`@gmail.com`／`@googlemail.com` 一律走 daily，即使 tier 對得上。
+tier id 存在 `Account.tierID`，每輪從 `loadCodeAssist` 更新——它同時決定後端與方案，而帳號第一次
+出現時手上還沒有 tier，所以預設值必須是 daily。`loadCodeAssist` 也要打同一個 host。
 
 額度每五分鐘在背景更新；失敗時保留最後一次成功快取並於帳號列顯示狀態。同一時間只跑一輪（期間再被呼叫就排到下一輪），避免兩輪同時換發輪替式 refresh token。
 

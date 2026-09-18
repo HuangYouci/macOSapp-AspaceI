@@ -19,6 +19,20 @@ final class QuotaService: Sendable {
 
     // MARK: Antigravity
 
+    /// Antigravity 的 cloud code 後端有兩個：GCP ToS 帳號走 prod，其餘（含所有消費者方案）走 daily。
+    /// 問錯後端不會報錯，只會回一份沒有任何使用紀錄的額度（永遠 100%、重置時間是「現在 + 視窗長度」）。
+    /// 判定順序沿用 cockpit-tools 的 `resolve_cloud_code_base_url` 與 `create_oauth_info_with_metadata`。
+    static let antigravityProdHost = "https://cloudcode-pa.googleapis.com"
+    static let antigravityDailyHost = "https://daily-cloudcode-pa.googleapis.com"
+
+    /// `standard-tier` 才是 GCP ToS；gmail／googlemail 位址一律不是，即使 tier 對得上。
+    static func antigravityHost(tierID: String?, email: String?) -> String {
+        if let email = email?.lowercased(), email.hasSuffix("@gmail.com") || email.hasSuffix("@googlemail.com") {
+            return antigravityDailyHost
+        }
+        return tierID?.lowercased() == "standard-tier" ? antigravityProdHost : antigravityDailyHost
+    }
+
     private func fetchAntigravity(data: Data, account: Account) async throws -> QuotaSnapshot {
         let root = try jsonObject(data)
         let token: String
@@ -29,31 +43,42 @@ final class QuotaService: Sendable {
         } else {
             throw QuotaError.missingToken
         }
+        let identity = try? await requestJSON(url: try endpoint("https://www.googleapis.com/oauth2/v2/userinfo"), token: token)["email"] as? String
+        let email = identity ?? account.email
+        // tier 每輪都查：它同時決定後端與方案，而帳號第一次出現時手上還沒有 tier。
+        let assist = await antigravityCodeAssist(token: token, host: Self.antigravityHost(tierID: account.tierID, email: email))
+        let tierID = assist.flatMap(Self.parseAntigravityTierID)
+        let host = Self.antigravityHost(tierID: tierID ?? account.tierID, email: email)
         let project = string(in: root, paths: [["project_id"], ["token", "project_id"], ["projectId"]])
-        var request = URLRequest(url: try endpoint("https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"))
+            ?? assist?["cloudaicompanionProject"] as? String
+        var request = URLRequest(url: try endpoint("\(host)/v1internal:retrieveUserQuotaSummary"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("antigravity", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONSerialization.data(withJSONObject: project.map { ["project": $0] } ?? [:])
         var snapshot = try Self.parseAntigravityQuota(try await sendJSON(request))
-        snapshot.identity = try? await requestJSON(url: try endpoint("https://www.googleapis.com/oauth2/v2/userinfo"), token: token)["email"] as? String
-        if account.planName == nil {
-            snapshot.plan = await antigravityPlan(token: token)
-        }
+        snapshot.identity = identity
+        snapshot.tierID = tierID
+        snapshot.plan = assist.flatMap(Self.parseAntigravityPlan) ?? account.planName
         return snapshot
     }
 
-    private func antigravityPlan(token: String) async -> String? {
-        guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist") else { return nil }
+    private func antigravityCodeAssist(token: String, host: String) async -> [String: Any]? {
+        guard let url = URL(string: "\(host)/v1internal:loadCodeAssist") else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("antigravity", forHTTPHeaderField: "User-Agent")
         request.httpBody = Data(#"{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}"#.utf8)
-        guard let value = try? await sendJSON(request) else { return nil }
-        return Self.parseAntigravityPlan(value)
+        return try? await sendJSON(request)
+    }
+
+    static func parseAntigravityTierID(_ value: [String: Any]) -> String? {
+        let id = ((value["paidTier"] as? [String: Any])?["id"] ?? (value["currentTier"] as? [String: Any])?["id"]) as? String
+        guard let id, !id.isEmpty else { return nil }
+        return id
     }
 
     /// 付費方案優先；tier id 例如 `free-tier`、`g1-pro-tier`、`g1-ultra-tier`。

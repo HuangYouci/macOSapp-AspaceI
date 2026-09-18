@@ -5,12 +5,15 @@ struct QuotaSnapshot: Codable, Equatable, Sendable {
     let fetchedAt: Date
     var identity: String?
     var plan: String?
+    /// Antigravity 的原始 tier id，決定要問哪個 cloud code 後端。
+    var tierID: String?
 
-    init(windows: [QuotaWindow], fetchedAt: Date, identity: String? = nil, plan: String? = nil) {
+    init(windows: [QuotaWindow], fetchedAt: Date, identity: String? = nil, plan: String? = nil, tierID: String? = nil) {
         self.windows = windows
         self.fetchedAt = fetchedAt
         self.identity = identity
         self.plan = plan
+        self.tierID = tierID
     }
 
     /// 主要時窗：menu bar 與緊縮列只取這兩格。
