@@ -13,9 +13,15 @@ final class AntigravitySystemCredentialService: Sendable {
     static let account = "antigravity"
     private static let prefix = "go-keyring-base64:"
 
-    /// 讀官方 App 目前使用的登入。這個項目由官方 App 以「允許所有程式」建立，讀取不會跳授權視窗。
-    func load() -> Data? {
-        guard let raw = rawItem() else { return nil }
+    /// 讀官方 App 目前使用的登入。
+    ///
+    /// `allowPrompt` 必須由呼叫端決定。AspaceI 自己寫入時用的是「允許所有程式」，但官方 App
+    /// 每次自己換 token 都會把項目重寫成只信任它自己，AspaceI 就會被 Keychain 擋下來跳密碼框。
+    /// 背景輪詢一律傳 false（跳不出來就當作沒有，改讀 jetski 檔案），否則每五分鐘跳一次。
+    /// cockpit-tools 在 macOS 上根本不讀這個項目（`read_antigravity_system_credential` 只編進
+    /// Windows），推測是同一個原因。
+    func load(allowPrompt: Bool = false) -> Data? {
+        guard let raw = rawItem(allowPrompt: allowPrompt) else { return nil }
         return Self.decode(raw)
     }
 
@@ -49,14 +55,17 @@ final class AntigravitySystemCredentialService: Sendable {
     }
 
     /// 項目的原始內容（還沒解 go-keyring 包裝），用於寫入前備份與寫入後比對。
-    private func rawItem() -> Data? {
-        let query: [String: Any] = [
+    private func rawItem(allowPrompt: Bool = true) -> Data? {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
             kSecAttrAccount as String: Self.account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
+        if !allowPrompt {
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
+        }
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
         return result as? Data

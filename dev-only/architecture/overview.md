@@ -129,7 +129,9 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 Antigravity 的登入位置隨版本改變，`< 2.0` 在 `state.vscdb`，**`>= 2.0` 在 macOS 登入 Keychain**（service `gemini`、account `antigravity`，內容為 go-keyring 的 `go-keyring-base64:<base64(JSON)>`）。`~/.gemini/jetski-standalone-oauth-token` 只是附帶產物，官方 App 不從那裡讀登入身分。2026-09-18 實測這台 Mac：Antigravity.app 2.14.0，Keychain 內是 A 帳號、jetski 檔案內是 B 帳號，兩者長期不同步——先前只寫檔案的版本切換一律不生效，額度顯示的也是官方 App 已經不在用的那個帳號。判定與封裝形狀比對自 cockpit-tools `antigravity_credential.rs` 與 `commands/account.rs`（`>= 2.0.0` 走 SystemCredential，版本解析不出來時也走這條）。
 
-`AntigravitySystemCredentialService` 負責這個項目：讀用 `SecItemCopyMatching`（官方 App 以「允許所有程式」建立，不跳授權視窗，因此每輪同步也讀得到，不受 `includeKeychain` 限制）；寫必須走 `/usr/bin/security add-generic-password -A`，先刪再加。以 `SecItemAdd` 建立的項目只有 AspaceI 自己能讀，官方 App 會被 Keychain 拒絕而當成沒登入。憑證只能放在 `-w` 的參數值裡：`-w` 不帶值改由 stdin 讀時，`security` 會在 **128 個字元處無聲截斷**（2026-09-18 實測送 418 字元讀回 128），寫出半截 JSON 把官方 App 的登入弄壞。代價是憑證短暫出現在行程參數列，與 cockpit-tools 相同。
+`AntigravitySystemCredentialService` 負責這個項目。**讀取只在使用者主動按「讀取這台 Mac」時進行**：AspaceI 自己寫入時用的是「允許所有程式」，但官方 App 每次自己換 token 都會把項目重寫成只信任它自己，背景輪詢去讀就會每五分鐘跳一次 Keychain 密碼框（2026-09-18 實際踩到）。背景路徑完全不呼叫，退回 jetski 檔案——它可能停在舊帳號，那是可以接受的代價。cockpit-tools 在 macOS 上根本不讀這個項目（`read_antigravity_system_credential` 只編進 Windows），推測是同一個原因。`load(allowPrompt:)` 在 false 時另外帶 `kSecUseAuthenticationUISkip` 當第二層保險，但不靠它決定要不要讀。
+
+寫必須走 `/usr/bin/security add-generic-password -A`，先刪再加。以 `SecItemAdd` 建立的項目只有 AspaceI 自己能讀，官方 App 會被 Keychain 拒絕而當成沒登入。憑證只能放在 `-w` 的參數值裡：`-w` 不帶值改由 stdin 讀時，`security` 會在 **128 個字元處無聲截斷**（2026-09-18 實測送 418 字元讀回 128），寫出半截 JSON 把官方 App 的登入弄壞。代價是憑證短暫出現在行程參數列，與 cockpit-tools 相同。
 
 寫入有三道防線，缺一不可——這個項目是官方 App 唯一的登入來源，寫壞就是把使用者登出：
 
