@@ -9,9 +9,14 @@ permissions:
 
 jobs:
   test:
-    runs-on: macos-15
+    # macos-15 映像只有 Swift 6.1，Package.swift 要 6.2，建置會在讀 manifest 就失敗。
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: 顯示工具版本
+        run: |
+          xcode-select -p
+          swift --version
       - name: 建置
         run: swift build
       - name: 測試
