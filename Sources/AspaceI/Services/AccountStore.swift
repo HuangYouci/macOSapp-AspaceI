@@ -17,7 +17,10 @@ final class AccountStore: Sendable {
     func save(_ accounts: [Account]) throws {
         let fileURL = try accountsFileURL()
         let data = try JSONEncoder().encode(accounts)
-        try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+        // `.completeFileProtection` 是 iOS 的資料保護等級，macOS 上不生效（檔案仍是 0644），
+        // 而且會讓 atomic 寫入在設定屬性那一步回報權限錯誤。權限直接自己設。
+        try data.write(to: fileURL, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 
     private func accountsFileURL() throws -> URL {

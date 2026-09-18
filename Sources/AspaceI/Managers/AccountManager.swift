@@ -365,6 +365,9 @@ final class AccountManager {
         }
         repeat {
             quotaRefreshPending = false
+            // 這則訊息描述的是最近一輪的結果。不在開頭清掉，一次暫時性失敗會永遠留在畫面上，
+            // 後面每輪都成功也不會消失。
+            errorMessage = nil
             await syncLocalCredentials()
             await refreshQuotasOnce()
         } while quotaRefreshPending && !Task.isCancelled
