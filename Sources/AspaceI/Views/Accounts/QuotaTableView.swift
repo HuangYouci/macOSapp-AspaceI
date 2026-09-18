@@ -25,7 +25,8 @@ struct QuotaTableView: View {
                 card(section.platform, accounts: section.accounts, now: now)
             }
             if let updatedAt = accounts.compactMap(\.quota?.fetchedAt).max() {
-                Text("更新於 \(updatedAt.formatted(date: .omitted, time: .shortened))")
+                // 帶秒數：手動按更新時，同一分鐘內只有時分的話這行不會變，看起來就像沒更新。
+                Text("更新於 \(updatedAt.formatted(date: .omitted, time: .standard))")
                     .font(.scaled(.caption2))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity)
