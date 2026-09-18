@@ -10,12 +10,13 @@ swift build --package-path "$project_dir" -c release
 
 release_dir="$project_dir/.build/release"
 # resource bundle 的位置取決於用哪個建置系統：Xcode 的放在 .build/out/Products/Release，
-# 純 SwiftPM 的放在 .build/release。只掃存在的目錄——find 吃到不存在的路徑會回非零，
-# 加上 set -e 會讓腳本就地結束在這一行（CI 上一直是這樣失敗的）。
+# 純 SwiftPM 的放在 .build/release。兩點都要小心：
+#   - find 吃到不存在的路徑會回非零，加上 set -e 會讓腳本就地結束在這一行。
+#   - .build/release 是符號連結，沒有 -H 的 find 不會跟進去，一個檔案都列不到。
 resource_bundle=""
 for candidate_dir in "$project_dir/.build/out/Products/Release" "$release_dir"; do
-    [[ -d "$candidate_dir" ]] || continue
-    resource_bundle=$(find "$candidate_dir" -maxdepth 1 -iname "*_AspaceI.bundle" -print -quit 2>/dev/null || true)
+    [[ -e "$candidate_dir" ]] || continue
+    resource_bundle=$(find -H "$candidate_dir" -maxdepth 1 -iname "*_AspaceI.bundle" -print -quit 2>/dev/null || true)
     [[ -n "$resource_bundle" ]] && break
 done
 if [[ -z "$resource_bundle" ]]; then
