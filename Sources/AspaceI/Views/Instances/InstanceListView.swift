@@ -4,6 +4,9 @@ struct InstanceListView: View {
     @Environment(InstanceManager.self) private var instanceManager
     @Environment(AccountManager.self) private var accountManager
     let onAdd: (PlatformKind) -> Void
+    let confirm: (ConfirmationRequest) -> Void
+
+    private static let menuWidth: CGFloat = 22
 
     var body: some View {
         ScrollView {
@@ -49,6 +52,7 @@ struct InstanceListView: View {
     private func row(_ instance: Instance, installed: Bool) -> some View {
         let running = instanceManager.isRunning(instance)
         let isDefault = instanceManager.isDefault(instance)
+        let removing = instanceManager.removingInstanceIDs.contains(instance.id)
         return HStack(spacing: 10) {
             Circle()
                 .fill(running ? Color.green : Color.black.opacity(0.12))
@@ -66,7 +70,7 @@ struct InstanceListView: View {
                 accountMenu(instance)
             }
 
-            Button(running ? "停止" : "啟動") {
+            Button(removing ? "刪除中" : (running ? "停止" : "啟動")) {
                 if running {
                     instanceManager.stop(instance)
                 } else {
@@ -75,14 +79,51 @@ struct InstanceListView: View {
             }
             .buttonStyle(.bordered)
             .tint(running ? .red : .accentColor)
-            .disabled(!installed)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .contextMenu {
-            if !isDefault {
-                Button("刪除", role: .destructive) { Task { await instanceManager.remove(instance) } }
+            .disabled(!installed || removing)
+
+            if isDefault {
+                Color.clear.frame(width: Self.menuWidth)
+            } else {
+                Menu {
+                    actions(instance, running: running)
+                } label: {
+                    Image(nsImage: .verticalEllipsis)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .frame(width: Self.menuWidth, alignment: .trailing)
+                .disabled(removing)
             }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
+        // 少了它，名稱與按鈕之間的空白點不到，右鍵只有剛好點在文字上才會出現選單。
+        .contentShape(Rectangle())
+        .contextMenu {
+            if !isDefault, !removing {
+                actions(instance, running: running)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actions(_ instance: Instance, running: Bool) -> some View {
+        Button("刪除…", systemImage: "trash", role: .destructive) {
+            confirm(ConfirmationRequest(
+                title: "刪除 \(instance.name)？",
+                message: running
+                    ? "\(instance.platform.clientName) 會先關閉，未儲存的內容可能遺失；資料夾移到垃圾桶。"
+                    : "資料夾移到垃圾桶。",
+                confirmTitle: "刪除"
+            ) {
+                Task { await instanceManager.remove(instance) }
+            })
         }
     }
 

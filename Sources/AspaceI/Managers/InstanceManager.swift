@@ -18,6 +18,7 @@ final class InstanceManager {
 
     private(set) var instances: [Instance] = []
     private(set) var switchingPlatform: PlatformKind?
+    private(set) var removingInstanceIDs: Set<UUID> = []
     private(set) var runningProcessIDs: [UUID: [Int32]] = [:]
     var errorMessage: String?
 
@@ -118,7 +119,7 @@ final class InstanceManager {
         }
     }
 
-    private func quit(_ instance: Instance) async throws {
+    private func quit(_ instance: Instance, timeoutError: InstanceError = .quitTimedOut) async throws {
         let isDefault = isDefault(instance)
         var pids = InstanceService.mainProcessIDs(for: instance, isDefault: isDefault, in: await processList())
         guard !pids.isEmpty else { return }
@@ -132,7 +133,7 @@ final class InstanceManager {
                 return
             }
         }
-        throw InstanceError.quitTimedOut
+        throw timeoutError
     }
 
     private func processList() async -> [Int32: String] {
@@ -180,12 +181,15 @@ final class InstanceManager {
 
     /// 先等實例程序真的結束再把資料夾移到垃圾桶，否則還在跑的 App 會把資料夾寫回來。
     func remove(_ instance: Instance) async {
-        guard !isDefault(instance) else { return }
+        guard !isDefault(instance), !removingInstanceIDs.contains(instance.id) else { return }
+        removingInstanceIDs.insert(instance.id)
+        defer { removingInstanceIDs.remove(instance.id) }
         do {
-            try await quit(instance)
+            try await quit(instance, timeoutError: .removeQuitTimedOut)
             try service.trashProfile(for: instance)
             instances.removeAll { $0.id == instance.id }
             persist()
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -147,13 +147,14 @@ final class InstanceService: Sendable {
 }
 
 enum InstanceError: LocalizedError {
-    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut
+    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut, removeQuitTimedOut
     var errorDescription: String? {
         switch self {
         case .executableMissing: "找不到 App"
         case .unsafeProfilePath: "拒絕刪除不在 AspaceI 管理範圍內的資料夾"
         case .launchFailed: "App 啟動失敗"
         case .quitTimedOut: "App 沒有在時間內關閉，未切換帳號"
+        case .removeQuitTimedOut: "App 沒有在時間內關閉，未刪除實例"
         }
     }
 }

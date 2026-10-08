@@ -1,8 +1,8 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-09-18
+最後更新日期：2026-10-08
 
-對應功能／commit：Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -122,6 +122,8 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。
 
 刪除 Instance 時先送 SIGTERM 並等主程序結束（最多 10 秒，逾時則不刪），否則還在跑的 App 會把資料夾寫回來。只允許處理 `Application Support/AspaceI/Instances/` 的直接子目錄，並移至垃圾桶以保留復原能力；外部路徑一律拒絕。
+
+刪除入口是列尾 ⋮ 選單與整列右鍵，經 `ConfirmationOverlay` 確認。早期只掛 `.contextMenu` 而列上沒有 `contentShape`，名稱與按鈕之間的空白收不到右鍵，使用者回報「實例刪不掉」（2026-10-08）；當時實測 Claude／Codex 實例 SIGTERM 0.3 秒內結束、移到垃圾桶與寫回 `instances.json` 都正常，問題只在入口。Codex 實例關閉後 crashpad 與 git 子程序會殘留幾秒，資料夾已在垃圾桶，不影響刪除。
 
 ### 切換帳號
 

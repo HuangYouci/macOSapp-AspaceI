@@ -21,7 +21,7 @@ struct MenuBarContentView: View {
                 case .quota:
                     quotaView
                 case .instances:
-                    InstanceListView { editor = .instance($0) }
+                    InstanceListView(onAdd: { editor = .instance($0) }, confirm: { confirmation = $0 })
                 case .settings:
                     ScrollView { SettingsView(confirm: { confirmation = $0 }).padding(2) }
                 }

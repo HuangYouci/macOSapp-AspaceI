@@ -32,3 +32,6 @@ accounts.json
 
 # Development backups
 dev-only/**/backup/
+
+# 拋棄式腳本與暫存產物
+dev-only/workspace/
