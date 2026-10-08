@@ -68,6 +68,8 @@ struct InstanceListView: View {
                 defaultAccountMenu(instance.platform)
             } else if instance.platform.supportsAccountBinding(isDefault: isDefault) {
                 accountMenu(instance)
+            } else if instance.platform == .claude, installed {
+                signedInAccountLabel(instance)
             }
 
             Button(removing ? "刪除中" : (running ? "停止" : "啟動")) {
@@ -153,6 +155,23 @@ struct InstanceListView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .disabled(instanceManager.switchingPlatform != nil)
+    }
+
+    /// Claude 的登入存在 App 自己加密的儲存區，AspaceI 寫不進去；這裡只顯示它實際登入的是誰。
+    @ViewBuilder
+    private func signedInAccountLabel(_ instance: Instance) -> some View {
+        if let uuid = instanceManager.signedInAccountUUIDs[instance.id] {
+            if let account = accountManager.accounts.first(where: { $0.platform == .claude && $0.accountUUID == uuid }) {
+                Text(account.label)
+                    .font(.scaled(.caption))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        } else {
+            Text("未登入")
+                .font(.scaled(.caption))
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private func accountMenu(_ instance: Instance) -> some View {

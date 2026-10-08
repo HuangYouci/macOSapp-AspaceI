@@ -44,6 +44,26 @@ struct InstanceServiceTests {
         #expect(InstanceService.mainProcessIDs(for: translocated, isDefault: false, in: list) == [505])
     }
 
+    @Test("Claude 實例登入帳號：要有帳號編號與 token 快取才算登入中")
+    func parsesClaudeSignedInAccount() {
+        let uuid = "A1579349-DF6C-4B51-B782-A15C70F8C35B"
+        let signedIn = Data(#"{"lastKnownAccountUuid":"\#(uuid)","oauth:tokenCacheV2":"djEw"}"#.utf8)
+        #expect(InstanceService.parseClaudeSignedInAccountUUID(signedIn) == uuid.lowercased())
+        let signedOut = Data(#"{"lastKnownAccountUuid":"\#(uuid)"}"#.utf8)
+        #expect(InstanceService.parseClaudeSignedInAccountUUID(signedOut) == nil)
+        let emptyCache = Data(#"{"lastKnownAccountUuid":"\#(uuid)","oauth:tokenCache":""}"#.utf8)
+        #expect(InstanceService.parseClaudeSignedInAccountUUID(emptyCache) == nil)
+        #expect(InstanceService.parseClaudeSignedInAccountUUID(Data(#"{"lastKnownAccountUuid":"not-a-uuid","oauth:tokenCache":"x"}"#.utf8)) == nil)
+        #expect(InstanceService.parseClaudeSignedInAccountUUID(Data("壞掉".utf8)) == nil)
+    }
+
+    @Test("Claude profile 的帳號編號統一成小寫")
+    func parsesClaudeProfileAccountUUID() {
+        #expect(QuotaService.parseClaudeAccountUUID(["account": ["uuid": "A1579349-DF6C-4B51-B782-A15C70F8C35B"]]) == "a1579349-df6c-4b51-b782-a15c70f8c35b")
+        #expect(QuotaService.parseClaudeAccountUUID(["account": ["uuid": "nope"]]) == nil)
+        #expect(QuotaService.parseClaudeAccountUUID([:]) == nil)
+    }
+
     @Test("預設實例 id 依平台固定且互不相同")
     @MainActor
     func defaultInstanceIDsAreStable() {

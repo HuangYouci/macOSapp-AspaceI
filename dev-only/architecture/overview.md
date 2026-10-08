@@ -2,7 +2,7 @@
 
 最後更新日期：2026-10-08
 
-對應功能／commit：實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -119,6 +119,7 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
   - `open` 會把呼叫端的環境變數轉交給 App，啟動時濾掉 `DYLD_*`。
 - 執行狀態以 `ps` 比對：主執行檔位於 `<App 名稱>.app/Contents/MacOS/`（只比對 App 名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行），預設實例是沒有 `--user-data-dir` 的那個，其他以資料夾比對（等號與空格兩種寫法都認）；停止送 SIGTERM。
 - 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 與 VS Code 的登入存在各自加密的儲存區，不提供綁定，實例內自行登入一次。
+- Claude 實例（含預設）改為**自動辨識**目前登入的帳號，列上只顯示、不提供選單：讀該實例資料夾 `config.json` 的 `lastKnownAccountUuid`，同時要有非空的 `oauth:tokenCache*` 才算登入中（`lastKnown` 登出後可能殘留，這一點未實測登出行為），再對到 `Account.accountUUID`（Claude `api/oauth/profile` 的 `account.uuid`，帳號沒有時每輪補抓）。2026-10-08 實測兩者同一套編號：`~/.claude.json` 的 `oauthAccount.accountUuid` 與預設 Claude 相同，兩個實例都對到正確帳號。不能做成像 Codex 的選單：AspaceI 手上是 Claude Code 的 OAuth token，桌面 App 的登入是 claude.ai cookie 與 safeStorage 加密的 token 快取，寫不進去。登入狀態在打開實例分頁與按更新時重讀。
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。
 
 刪除 Instance 時先送 SIGTERM 並等主程序結束（最多 10 秒，逾時則不刪），否則還在跑的 App 會把資料夾寫回來。只允許處理 `Application Support/AspaceI/Instances/` 的直接子目錄，並移至垃圾桶以保留復原能力；外部路徑一律拒絕。

@@ -12,6 +12,8 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     var planName: String?
     /// Antigravity 的原始 tier id（例如 `g1-pro-tier`、`standard-tier`），決定要問哪個 cloud code 後端。
     var tierID: String?
+    /// 平台端的帳號編號；Claude 用它對應桌面 App 實例登入的是哪個帳號。
+    var accountUUID: String?
     var credentialReference: String?
     var quota: QuotaSnapshot?
     var lastError: String?
@@ -32,6 +34,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         email: String? = nil,
         planName: String? = nil,
         tierID: String? = nil,
+        accountUUID: String? = nil,
         credentialReference: String? = nil,
         quota: QuotaSnapshot? = nil,
         lastError: String? = nil,
@@ -45,6 +48,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         self.email = email
         self.planName = planName
         self.tierID = tierID
+        self.accountUUID = accountUUID
         self.credentialReference = credentialReference
         self.quota = quota
         self.lastError = lastError
@@ -54,7 +58,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, platform, displayName, email, planName, tierID, credentialReference, quota, lastError, sourcePath, isActive, origin
+        case id, platform, displayName, email, planName, tierID, accountUUID, credentialReference, quota, lastError, sourcePath, isActive, origin
     }
 
     init(from decoder: Decoder) throws {
@@ -65,6 +69,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
         email = try container.decodeIfPresent(String.self, forKey: .email)
         planName = try container.decodeIfPresent(String.self, forKey: .planName)
         tierID = try container.decodeIfPresent(String.self, forKey: .tierID)
+        accountUUID = try container.decodeIfPresent(String.self, forKey: .accountUUID)
         credentialReference = try container.decodeIfPresent(String.self, forKey: .credentialReference)
         quota = try container.decodeIfPresent(QuotaSnapshot.self, forKey: .quota)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)

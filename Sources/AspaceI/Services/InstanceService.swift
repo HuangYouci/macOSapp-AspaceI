@@ -107,6 +107,29 @@ final class InstanceService: Sendable {
         .sorted()
     }
 
+    /// Claude 桌面 App 實例目前登入的帳號編號；沒登入、讀不到或格式不對都回 nil。
+    /// 預設實例讀官方 App 自己的資料夾。只讀 `config.json`，不碰加密的登入資料。
+    func claudeSignedInAccountUUID(for instance: Instance, isDefault: Bool) -> String? {
+        guard instance.platform == .claude else { return nil }
+        let directory: URL
+        if isDefault {
+            guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+            directory = support.appending(path: "Claude", directoryHint: .isDirectory)
+        } else {
+            directory = URL(fileURLWithPath: instance.profileDirectory)
+        }
+        guard let data = try? Data(contentsOf: directory.appending(path: "config.json")) else { return nil }
+        return Self.parseClaudeSignedInAccountUUID(data)
+    }
+
+    /// `lastKnownAccountUuid` 登出後可能還留著，所以另外要求登入 token 快取存在才算登入中。
+    static func parseClaudeSignedInAccountUUID(_ data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = root["lastKnownAccountUuid"] as? String, UUID(uuidString: value) != nil,
+              root.contains(where: { $0.key.hasPrefix("oauth:tokenCache") && !(($0.value as? String) ?? "").isEmpty }) else { return nil }
+        return value.lowercased()
+    }
+
     func stop(processIDs: [Int32]) {
         for pid in processIDs {
             kill(pid, SIGTERM)

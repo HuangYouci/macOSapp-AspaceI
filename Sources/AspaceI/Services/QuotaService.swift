@@ -212,16 +212,22 @@ final class QuotaService: Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         var snapshot = try Self.parseClaudeQuota(try await sendJSON(request))
-        if account.planName == nil || account.email == nil {
+        if account.planName == nil || account.email == nil || account.accountUUID == nil {
             var profileRequest = request
             profileRequest.url = URL(string: "https://api.anthropic.com/api/oauth/profile")
             if let profile = try? await sendJSON(profileRequest) {
-                snapshot.plan = Self.parseClaudePlan(profile)
+                snapshot.plan = Self.parseClaudePlan(profile) ?? account.planName
                 snapshot.identity = (profile["account"] as? [String: Any])?["email"] as? String
                     ?? (profile["account"] as? [String: Any])?["email_address"] as? String
+                snapshot.accountUUID = Self.parseClaudeAccountUUID(profile)
             }
         }
         return snapshot
+    }
+
+    static func parseClaudeAccountUUID(_ profile: [String: Any]) -> String? {
+        guard let value = (profile["account"] as? [String: Any])?["uuid"] as? String, UUID(uuidString: value) != nil else { return nil }
+        return value.lowercased()
     }
 
     static func parseClaudePlan(_ profile: [String: Any]) -> String? {

@@ -20,6 +20,8 @@ final class InstanceManager {
     private(set) var switchingPlatform: PlatformKind?
     private(set) var removingInstanceIDs: Set<UUID> = []
     private(set) var runningProcessIDs: [UUID: [Int32]] = [:]
+    /// 實例 id → 該實例的 App 目前登入的平台帳號編號（目前只有 Claude）。
+    private(set) var signedInAccountUUIDs: [UUID: String] = [:]
     var errorMessage: String?
 
     private let service = InstanceService.shared
@@ -170,13 +172,16 @@ final class InstanceManager {
     func refreshRunning() {
         let processes = service.runningProcessIDs()
         var result: [UUID: [Int32]] = [:]
+        var signedIn: [UUID: String] = [:]
         for group in groups {
             for instance in group.all {
                 let pids = InstanceService.mainProcessIDs(for: instance, isDefault: isDefault(instance), in: processes)
                 if !pids.isEmpty { result[instance.id] = pids }
+                signedIn[instance.id] = service.claudeSignedInAccountUUID(for: instance, isDefault: isDefault(instance))
             }
         }
         runningProcessIDs = result
+        signedInAccountUUIDs = signedIn
     }
 
     /// 先等實例程序真的結束再把資料夾移到垃圾桶，否則還在跑的 App 會把資料夾寫回來。
