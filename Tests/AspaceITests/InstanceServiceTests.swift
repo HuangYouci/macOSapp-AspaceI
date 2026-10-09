@@ -23,7 +23,8 @@ struct InstanceServiceTests {
         #expect(InstanceService.openArguments(for: vscode, isDefault: false) == [
             "-n", "-a", "/Applications/Visual Studio Code.app", "--args", "--user-data-dir=/p/vscode"
         ])
-        #expect(InstanceService.openArguments(for: vscode, isDefault: true) == ["-a", "/Applications/Visual Studio Code.app"])
+        // 預設實例也要 -n，否則其他實例在跑時 open 只會把其中一個叫到前面。
+        #expect(InstanceService.openArguments(for: vscode, isDefault: true) == ["-n", "-a", "/Applications/Visual Studio Code.app"])
     }
 
     @Test("依主執行檔與 user-data-dir 區分預設與獨立實例，忽略 Helper 程序")
@@ -42,6 +43,22 @@ struct InstanceServiceTests {
         #expect(InstanceService.mainProcessIDs(for: codex, isDefault: false, in: list) == [404])
         let translocated = Instance(name: "VS Code 3", platform: .githubCopilot, profileDirectory: "/p/vscode-2", executablePath: "/Applications/Visual Studio Code.app")
         #expect(InstanceService.mainProcessIDs(for: translocated, isDefault: false, in: list) == [505])
+    }
+
+    @Test("偵測等待安裝的 ShipIt 與 Sparkle，只認同一個 App 的，不認 Helper 或別的 App")
+    func detectsPendingUpdaters() {
+        let list = InstanceService.parseProcessList("""
+          10 /Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/p/claude
+          11 /Applications/Claude.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt com.anthropic.claudefordesktop.ShipIt /Users/u/Library/Caches/com.anthropic.claudefordesktop.ShipIt/ShipItState.plist
+          20 /Applications/ChatGPT.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate com.openai.codex /Users/u u
+          21 /Users/u/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Launcher/X/Updater.app/Contents/MacOS/Updater /Applications/ChatGPT.app 0
+          22 /Applications/ChatGPT.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader
+          30 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper --type=renderer
+          40 /Applications/Claude Beta.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt x
+        """)
+        #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/Claude.app", in: list) == [11])
+        #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/ChatGPT.app", in: list) == [20])
+        #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/Visual Studio Code.app", in: list).isEmpty)
     }
 
     @Test("Claude 實例登入帳號：要有帳號編號與 token 快取才算登入中")

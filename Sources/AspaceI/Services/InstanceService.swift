@@ -27,7 +27,7 @@ final class InstanceService: Sendable {
         try JSONEncoder().encode(store).write(to: try storeURL(), options: [.atomic, .completeFileProtection])
     }
 
-    /// 以 `open` 啟動桌面 App；預設實例沿用系統既有視窗，其他實例強制開新程序並指定獨立資料夾。
+    /// 以 `open -n` 啟動桌面 App；其他實例另外指定獨立資料夾。只在實例沒有執行時呼叫。
     func launch(_ instance: Instance, isDefault: Bool) throws {
         guard FileManager.default.fileExists(atPath: instance.executablePath) else { throw InstanceError.executableMissing }
         if !isDefault {
@@ -46,7 +46,8 @@ final class InstanceService: Sendable {
     }
 
     static func openArguments(for instance: Instance, isDefault: Bool) -> [String] {
-        guard !isDefault else { return ["-a", instance.executablePath] + (instance.arguments.isEmpty ? [] : ["--args"] + instance.arguments) }
+        // 預設實例也要 -n：同一個 App 已有其他實例在跑時，沒有 -n 的 open 只會把其中一個叫到前面，預設實例根本沒開。
+        guard !isDefault else { return ["-n", "-a", instance.executablePath] + (instance.arguments.isEmpty ? [] : ["--args"] + instance.arguments) }
         let userDataDirectory = userDataDirectory(for: instance)
         var arguments = ["-n"]
         if instance.platform == .codex {
@@ -103,6 +104,18 @@ final class InstanceService: Sendable {
                 return found.upperBound == command.endIndex || command[found.upperBound] == " "
             }
             return matches ? pid : nil
+        }
+        .sorted()
+    }
+
+    /// App 自己的更新程式（Squirrel 的 ShipIt、Sparkle 的 Autoupdate）是否在等待安裝。
+    /// 兩者都要等同一個 App 的所有程序結束才會換掉 App；多開時只要還有一個實例在跑就永遠等下去。
+    static func updaterProcessIDs(appPath: String, in processes: [Int32: String]) -> [Int32] {
+        let app = "/\(URL(fileURLWithPath: appPath).lastPathComponent)/Contents/Frameworks/"
+        return processes.compactMap { pid, command in
+            let isShipIt = command.contains(app + "Squirrel.framework/Resources/ShipIt")
+            let isSparkle = command.contains(app + "Sparkle.framework/") && command.contains("/Autoupdate")
+            return isShipIt || isSparkle ? pid : nil
         }
         .sorted()
     }
@@ -170,7 +183,7 @@ final class InstanceService: Sendable {
 }
 
 enum InstanceError: LocalizedError {
-    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut, removeQuitTimedOut
+    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut, removeQuitTimedOut, updateQuitTimedOut, updateTimedOut
     var errorDescription: String? {
         switch self {
         case .executableMissing: "找不到 App"
@@ -178,6 +191,8 @@ enum InstanceError: LocalizedError {
         case .launchFailed: "App 啟動失敗"
         case .quitTimedOut: "App 沒有在時間內關閉，未切換帳號"
         case .removeQuitTimedOut: "App 沒有在時間內關閉，未刪除實例"
+        case .updateQuitTimedOut: "App 沒有在時間內關閉，未更新"
+        case .updateTimedOut: "更新沒有在時間內完成"
         }
     }
 }

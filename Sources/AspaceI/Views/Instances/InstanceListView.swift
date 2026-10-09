@@ -32,6 +32,13 @@ struct InstanceListView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
+                if instanceManager.updatingPlatform == group.platform {
+                    Text("更新中")
+                        .font(.scaled(.caption))
+                        .foregroundStyle(.secondary)
+                } else if group.isInstalled, instanceManager.pendingUpdatePlatforms.contains(group.platform) {
+                    updateButton(group)
+                }
                 Button("新增實例", systemImage: "plus") { onAdd(group.platform) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
@@ -112,6 +119,22 @@ struct InstanceListView: View {
                 actions(instance, running: running)
             }
         }
+    }
+
+    private func updateButton(_ group: InstanceManager.Group) -> some View {
+        let runningCount = group.all.filter { instanceManager.isRunning($0) }.count
+        return Button("更新並重開", systemImage: "arrow.down.circle") {
+            confirm(ConfirmationRequest(
+                title: "更新 \(group.platform.clientName)？",
+                message: "執行中的 \(runningCount) 個實例會關閉，更新完成後重新開啟；未儲存的內容可能遺失。",
+                confirmTitle: "更新並重開"
+            ) {
+                Task { await instanceManager.updateAndRelaunch(group.platform, accounts: accountManager) }
+            })
+        }
+        .font(.scaled(.caption))
+        .buttonStyle(.borderless)
+        .disabled(instanceManager.updatingPlatform != nil)
     }
 
     @ViewBuilder

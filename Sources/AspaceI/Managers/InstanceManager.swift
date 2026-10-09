@@ -18,6 +18,9 @@ final class InstanceManager {
 
     private(set) var instances: [Instance] = []
     private(set) var switchingPlatform: PlatformKind?
+    /// App 自己的更新程式正在等所有程序結束的平台。
+    private(set) var pendingUpdatePlatforms: Set<PlatformKind> = []
+    private(set) var updatingPlatform: PlatformKind?
     private(set) var removingInstanceIDs: Set<UUID> = []
     private(set) var runningProcessIDs: [UUID: [Int32]] = [:]
     /// 實例 id → 該實例的 App 目前登入的平台帳號編號（目前只有 Claude）。
@@ -122,20 +125,60 @@ final class InstanceManager {
     }
 
     private func quit(_ instance: Instance, timeoutError: InstanceError = .quitTimedOut) async throws {
-        let isDefault = isDefault(instance)
-        var pids = InstanceService.mainProcessIDs(for: instance, isDefault: isDefault, in: await processList())
-        guard !pids.isEmpty else { return }
-        service.stop(processIDs: pids)
+        try await quit([instance], timeoutError: timeoutError)
+    }
+
+    /// 一次送出 SIGTERM，再等全部主程序結束（最多 10 秒）。
+    private func quit(_ targets: [Instance], timeoutError: InstanceError) async throws {
+        func pids(in processes: [Int32: String]) -> [Int32] {
+            targets.flatMap { InstanceService.mainProcessIDs(for: $0, isDefault: isDefault($0), in: processes) }
+        }
+        let initial = pids(in: await processList())
+        guard !initial.isEmpty else { return }
+        service.stop(processIDs: initial)
         for _ in 0..<20 {
             try await Task.sleep(for: .milliseconds(500))
-            pids = InstanceService.mainProcessIDs(for: instance, isDefault: isDefault, in: await processList())
-            if pids.isEmpty {
-                runningProcessIDs[instance.id] = nil
+            if pids(in: await processList()).isEmpty {
+                for target in targets { runningProcessIDs[target.id] = nil }
                 try await Task.sleep(for: .milliseconds(500))
                 return
             }
         }
         throw timeoutError
+    }
+
+    /// 關閉這個 App 的所有實例讓更新程式換掉 App，再把原本開著的實例重新開回來。
+    /// 更新程式等不到所有程序結束就不會安裝；任何一個實例開著，App 自己為了更新而結束的那個實例就回不來。
+    func updateAndRelaunch(_ platform: PlatformKind, accounts: AccountManager) async {
+        guard updatingPlatform == nil, let group = groups.first(where: { $0.platform == platform }), group.isInstalled else { return }
+        updatingPlatform = platform
+        defer { updatingPlatform = nil }
+        let appPath = group.defaultInstance.executablePath
+        let processes = await processList()
+        let running = group.all.filter { !InstanceService.mainProcessIDs(for: $0, isDefault: isDefault($0), in: processes).isEmpty }
+        var failure: Error?
+        do {
+            try await quit(running, timeoutError: .updateQuitTimedOut)
+            try await waitForUpdater(appPath: appPath)
+        } catch {
+            failure = error
+        }
+        // 更新失敗也要把實例開回來；還在跑的（關閉逾時）跳過，免得開出第二個程序。
+        let stillRunning = await processList()
+        for instance in running where InstanceService.mainProcessIDs(for: instance, isDefault: isDefault(instance), in: stillRunning).isEmpty {
+            launch(instance, accounts: accounts)
+        }
+        if let failure { errorMessage = failure.localizedDescription }
+        refreshRunning()
+    }
+
+    /// 安裝通常幾秒內完成；等到 60 秒還在就放棄，讓使用者至少拿回實例。
+    private func waitForUpdater(appPath: String) async throws {
+        for _ in 0..<120 {
+            if InstanceService.updaterProcessIDs(appPath: appPath, in: await processList()).isEmpty { return }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw InstanceError.updateTimedOut
     }
 
     private func processList() async -> [Int32: String] {
@@ -173,7 +216,11 @@ final class InstanceManager {
         let processes = service.runningProcessIDs()
         var result: [UUID: [Int32]] = [:]
         var signedIn: [UUID: String] = [:]
+        var pendingUpdates: Set<PlatformKind> = []
         for group in groups {
+            if group.isInstalled, !InstanceService.updaterProcessIDs(appPath: group.defaultInstance.executablePath, in: processes).isEmpty {
+                pendingUpdates.insert(group.platform)
+            }
             for instance in group.all {
                 let pids = InstanceService.mainProcessIDs(for: instance, isDefault: isDefault(instance), in: processes)
                 if !pids.isEmpty { result[instance.id] = pids }
@@ -182,6 +229,7 @@ final class InstanceManager {
         }
         runningProcessIDs = result
         signedInAccountUUIDs = signedIn
+        pendingUpdatePlatforms = pendingUpdates
     }
 
     /// 先等實例程序真的結束再把資料夾移到垃圾桶，否則還在跑的 App 會把資料夾寫回來。

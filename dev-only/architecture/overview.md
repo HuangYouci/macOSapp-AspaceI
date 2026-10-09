@@ -1,8 +1,8 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-10-08
+最後更新日期：2026-10-09
 
-對應功能／commit：Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -110,7 +110,7 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 實例一律是桌面 App，依服務分組：VS Code（GitHub Copilot）、Antigravity、Claude、Codex。App 由 `ExecutableLocatorService` 在 `/Applications` 與 `~/Applications` 尋找；未安裝時整組停用。
 
-- 每組第一個是「預設」實例：不存檔、不可刪除，id 依平台固定。以 `open -a` 開啟系統原本的 App 設定。
+- 每組第一個是「預設」實例：不存檔、不可刪除，id 依平台固定。以 `open -n -a` 開啟系統原本的 App 設定。`-n` 不能省：同一個 App 已有其他實例在跑時，沒有 `-n` 的 `open` 只會把其中一個（不一定是哪個）叫到前面，預設實例根本沒開（2026-10-09 使用者回報「再開啟不一定是我要的 Instance」）。啟動只在實例沒有執行時發生；萬一狀態過期多開了一個，Electron 的單一實例鎖會讓它把焦點交給原本那個後自行結束。
 - 其他實例以 `open -n -a <App> --args --user-data-dir=<資料夾>` 開新程序（2026-09-14 四平台實測）：
   - 必須用等號形式；Claude 會忽略空格分開的寫法，改用預設資料夾。
   - Codex（ChatGPT.app）另以 `--env CODEX_HOME=<資料夾>`、`--env CODEX_ELECTRON_USER_DATA_PATH=<資料夾>/app-data`；新版只認這個環境變數，沒設的話第二個程序會被單一實例鎖直接結束。
@@ -121,6 +121,23 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 - 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 與 VS Code 的登入存在各自加密的儲存區，不提供綁定，實例內自行登入一次。
 - Claude 實例（含預設）改為**自動辨識**目前登入的帳號，列上只顯示、不提供選單：讀該實例資料夾 `config.json` 的 `lastKnownAccountUuid`，同時要有非空的 `oauth:tokenCache*` 才算登入中（`lastKnown` 登出後可能殘留，這一點未實測登出行為），再對到 `Account.accountUUID`（Claude `api/oauth/profile` 的 `account.uuid`，帳號沒有時每輪補抓）。2026-10-08 實測兩者同一套編號：`~/.claude.json` 的 `oauthAccount.accountUuid` 與預設 Claude 相同，兩個實例都對到正確帳號。不能做成像 Codex 的選單：AspaceI 手上是 Claude Code 的 OAuth token，桌面 App 的登入是 claude.ai cookie 與 safeStorage 加密的 token 快取，寫不進去。登入狀態在打開實例分頁與按更新時重讀。
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。
+
+### 多開與 App 自動更新
+
+Claude（Squirrel／ShipIt）、VS Code（Squirrel）、Codex（Sparkle）的更新程式都要等**同一個 App 的所有程序**結束才換掉 App。多開時這個條件永遠不成立，造成：
+
+- Claude 下載好更新、閒置一段時間後會自己結束來安裝（記錄檔 `[stealth-update]`／`beforeQuitForUpdate`），但 ShipIt 等不到其他實例結束，**安裝不會發生、結束的那個實例也不會被重新打開**——使用者看到的是「多開被關閉」。2026-10-09 實測：12:25 關掉 2-big、12:30 關掉預設實例，1-big 一直開著，ShipIt 從 05:19 起每次都停在 `Detected this as an install request`，`main.log` 每次啟動都報 `Previous update install did not apply`。所有實例共用 `~/Library/Logs/Claude/main.log`，要以記錄中的 user-data-dir 或 session 檔所在資料夾判斷是哪個實例。
+- 等到使用者把全部關掉，ShipIt 才安裝，`launchAfterInstallation` 為真時只會開 `/Applications/Claude.app`（不帶參數 = 預設實例）。
+- Codex 的 Sparkle `Autoupdate` 也是同樣情形（當天 16:22 起一直在等）。
+
+AspaceI 無法阻止 App 自己結束，只能讓更新真的裝上：`refreshRunning` 以 `ps` 找 `<App>.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt` 或 `Sparkle.framework/…/Autoupdate`，有的話該組標題顯示「更新並重開」。確認後一次對該 App 所有實例送 SIGTERM、等主程序結束（10 秒）、等更新程式結束（60 秒），再把原本開著的實例開回來；更新逾時也照樣開回來。App 自己先結束的那個實例不在清單裡，要手動開。
+
+### 非預設實例的 App 名稱與圖示
+
+Dock／⌘Tab 顯示的是程序所屬 bundle 的名稱與圖示，外部無法改：
+
+- `_LSSetApplicationInformationItem` 對別的程序設 `_kLSDisplayNameKey` 回傳 0 但不生效（2026-10-09 實測）。
+- 唯一做法是複製 App（APFS clone）、改 Info.plist 與圖示、重新簽章。Claude 主程式帶 `keychain-access-groups` 與 `com.apple.application-identifier`（Anthropic 團隊的受限權限），用別的身分簽就必須拿掉，passkey／硬體金鑰／Microsoft 登入會失效；另外 hardened runtime 的 library validation 要求整包同一團隊簽章、改 bundle id 後 TCC 權限要重新授權、`Claude Safe Storage` Keychain 會再詢問、複本不會自動更新。尚未實作，待決定。
 
 刪除 Instance 時先送 SIGTERM 並等主程序結束（最多 10 秒，逾時則不刪），否則還在跑的 App 會把資料夾寫回來。只允許處理 `Application Support/AspaceI/Instances/` 的直接子目錄，並移至垃圾桶以保留復原能力；外部路徑一律拒絕。
 
