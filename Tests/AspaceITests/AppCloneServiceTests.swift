@@ -30,11 +30,12 @@ struct AppCloneServiceTests {
         #expect(AppCloneService.sanitizedFileName(".hidden") == "_.hidden")
     }
 
-    @Test("圖示標籤取使用者名稱前兩個字母或數字並轉大寫")
-    func buildsBadgeText() {
-        #expect(InstanceIconRenderer.badgeText(for: "yc.huang") == "YC")
-        #expect(InstanceIconRenderer.badgeText(for: "1-big") == "1B")
-        #expect(InstanceIconRenderer.badgeText(for: "工作帳號") == "工作")
-        #expect(InstanceIconRenderer.badgeText(for: "--") == "--")
+    @Test("最新版：數字比較，同版時取排在前面的原本 App，讀不到版本的略過")
+    func picksNewestBundle() {
+        let original = URL(fileURLWithPath: "/Applications/Claude.app")
+        #expect(AppCloneService.newest([(original, "2.26454.2"), (old, "2.26454.2")]) == original)
+        #expect(AppCloneService.newest([(original, "2.26454.2"), (old, "2.31226.0"), (updated, nil)]) == old)
+        #expect(AppCloneService.newest([(original, "1.9"), (old, "1.10")]) == old)
+        #expect(AppCloneService.newest([(original, nil)]) == nil)
     }
 }

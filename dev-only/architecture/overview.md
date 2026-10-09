@@ -2,7 +2,7 @@
 
 最後更新日期：2026-10-09
 
-對應功能／commit：非預設實例改用 App 複本（Dock 圖示右下角標使用者名稱前兩字）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -64,7 +64,8 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 - Popup 固定 456 × 640，各分頁內容自行捲動。曾嘗試高度隨內容並錨定左上角，但 MenuBarExtra 視窗縮放時仍會跳動，因此改為固定尺寸（2026-09-13 決策）。加入帳號與新增實例在 popup 內切換畫面，不使用 sheet。
 - 字級：macOS 不支援 Dynamic Type，popup 內一律使用 `Font.scaled(_:)`，以系統文字樣式基準放大 1.2 倍；根視圖設定 `.scaled(.body)` 讓控制項文字一併放大。
 - MenuBarExtra 視窗不吃 `preferredColorScheme`，以 `PopupWindowConfigurator` 直接設定 NSWindow 為 aqua。
-- Menu bar 最多顯示三個使用者在設定勾選的帳號，格式為「平台單色標誌 帳號前三字 5h% 7d%」，以 `|` 分隔；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
+- Menu bar 最多顯示三個使用者在設定勾選的帳號，格式為「平台單色標誌 短名稱 5h% 7d%」，以 `|` 分隔；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
+- 短名稱（`ShortLabel`，menu bar 與實例 Dock 圖示共用）：取前三字；任兩個前三字相同時保留前兩字、第三字改取各自第一個不同的字（三個以上就先分出獨一的，同組的再往後比；比到某個名稱結束時它保留原本前三字）；比到最後仍相同就第三位改用 1、2、3…（依帳號順序）。比較範圍是**所有帳號**而非只有勾選的，同一個帳號在 menu bar 與 Dock 才會是同一個短名稱。
 - App Icon 原始檔為 `Support/AppIcon.icon`（Icon Composer 格式），`build-app.sh` 以 `actool` 編譯為 `Assets.car` 與 `AppIcon.icns`；menu bar 圖示與平台單色標誌為 `Resources/Logos/*-glyph.png`。
 - 額度頁（`QuotaTableView`）每個平台一張卡片，卡片標題列同時是欄名（段／週／月），三欄在所有卡片對齊以便比較；沒有該時窗顯示「–」。只顯示百分比，不用顏色區分高低。底部顯示最近一次更新時間。
 - 有百分比的格子在下方顯示該時窗的重置倒數（`QuotaCountdown`）：最多兩個時間單位，第二個單位為零時只顯示一個，已重置則不顯示。整張表包在 `TimelineView(.periodic(from:by:))` 的每秒節拍裡重畫，popup 收起後視圖消失就不再更新。
@@ -130,7 +131,13 @@ Claude（Squirrel／ShipIt）、VS Code（Squirrel）、Codex（Sparkle）的更
 - 等到使用者把全部關掉，ShipIt 才安裝，`launchAfterInstallation` 為真時只會開 `/Applications/Claude.app`（不帶參數 = 預設實例）。
 - Codex 的 Sparkle `Autoupdate` 也是同樣情形（當天 16:22 起一直在等）。
 
-非預設實例改用各自的複本後，原本 App 只剩預設實例會擋住它的更新程式，問題自然消失（Squirrel 只等同一路徑的程序）。過渡期仍可能有從原本 App 開的非預設實例：`refreshRunning` 以 `ps` 找原本 App 的 `Squirrel.framework/Resources/ShipIt` 或 `Sparkle.framework/…/Autoupdate`，**而且**有非預設實例直接從原本 App 執行時，該組標題顯示「更新並重開」。確認後只關從原本 App 執行的實例、等主程序結束（10 秒）、等更新程式結束（60 秒），再開回來（非預設實例就此改用複本）；更新逾時也照樣開回來。App 自己先結束的那個實例不在清單裡，要手動開。Sparkle 是否也只等同一路徑未驗證。
+非預設實例改用各自的複本後，更新程式不再互相卡住（Squirrel 只等同一路徑的程序），但每一份各自更新、版本會分岔。**同平台的實例要一起更新**：
+
+- 複本的來源是「原本的 App 與同平台所有複本中版本最新的那份」（同版用原本的 App），哪一份先拿到更新，其他複本下次開啟就跟上。原本的 App 只有它自己的更新程式能換（AspaceI 不寫 `/Applications`），所以複本較新時預設實例會晚一步。
+- `refreshRunning` 判斷該組要不要更新：原本 App 或該平台任一實例複本的 `Squirrel.framework/Resources/ShipIt`、`Sparkle.framework/…/Autoupdate` 在跑，或有執行中的實例（以主程序命令列取出它的 App 路徑讀版本）比最新版舊。成立時該組標題顯示「更新並重開」。
+- 確認後關閉該組**所有**執行中實例、等主程序結束（10 秒）、等上述更新程式全部結束（60 秒），再把原本開著的開回來（複本此時換成最新版）；更新逾時也照樣開回來。App 自己先結束的那個實例不在清單裡，要手動開。
+- 不自動關閉執行中的實例：關掉會中斷進行中的工作，AspaceI 看不出 App 是否閒置。
+- Sparkle 是否也只等同一路徑未驗證。
 
 ### 非預設實例的 App 名稱與圖示
 
@@ -140,13 +147,13 @@ Dock 顯示的是程序所屬 bundle 的圖示，執行中無法從外部改（2
 
 - 位置：`Application Support/AspaceI/Apps.noindex/<實例 id 前 8 碼小寫>/<App 名稱> - <使用者名稱>.app`。`.noindex` 讓 Spotlight 不收錄——從 Spotlight 直接打開複本會開到預設資料夾。
 - `clonefile` 整包複製（APFS，不到 1 秒、幾乎不佔空間），不動 `Contents`、不重簽；簽章與 bundle id 不變，`codesign --verify` 與原 designated requirement 都通過，Keychain 不再詢問、TCC 權限沿用。只在 bundle 根目錄以 `NSWorkspace.setIcon` 寫 `Icon\r`（`--strict` 會因此失敗，一般驗證不受影響）。
-- 圖示：原本 App 的圖示右下角疊深色膠囊與使用者名稱前兩個字母或數字（`InstanceIconRenderer`）。使用者名稱：Claude 取實例 `config.json` 辨識到的帳號，Codex 取綁定的帳號，其他或不知道時用實例名稱。每次啟動都重畫，帳號變了下次啟動就會更新。
+- 圖示：原本 App 的圖示（不是複本的，複本已帶標籤）右下角疊深色膠囊與三字短名稱（`InstanceIconRenderer`、`ShortLabel`）。帳號：Claude 取實例 `config.json` 辨識到的帳號，Codex 取綁定的帳號，短名稱與 menu bar 相同；不知道帳號時用實例名稱，與所有帳號及其他這類實例一起比。每次啟動都重畫，帳號變了下次啟動就會更新。
 - 原本 App 帶 `com.apple.quarantine` 時（實測 VS Code 有）複本會移除它：原版已經過使用者確認，複本換了位置會被再問一次或改從暫存路徑執行。
-- 版本：複本比原本 App 舊就刪掉重做；複本自己更新過（ShipIt 可能把檔名改回 `Claude.app`）而比原版新就沿用、改回實例名稱。版本直接讀 Info.plist，`Bundle(url:)` 依路徑快取會回舊值。
+- 版本：實例資料夾內版本最新的複本若不比來源舊就沿用（改回實例名稱；ShipIt 可能把檔名改回 `Claude.app`），否則刪掉從來源重做。版本直接讀 Info.plist，`Bundle(url:)` 依路徑快取會回舊值。
 - **Dock 名稱改不了**：滑鼠移到圖示上仍是 `Claude`（`CFBundleName`），要改就得改 Info.plist、簽章失效，回到重簽的代價（`keychain-access-groups` 等受限權限、library validation、TCC）。檔名只在 Finder 看得到。
 - `claude://` 的預設處理者仍是 `/Applications/Claude.app`，複本只是候選。
 - 複本更新：ShipIt 安裝完重開時不帶參數，開到預設資料夾。`InstanceManager.startMonitoring` 監看 `didLaunchApplicationNotification`，在複本資料夾內、命令列沒有 `--user-data-dir` 的程序一律關掉，改以實例資料夾重開（順便把檔名與圖示改回來）。AspaceI 沒在執行時這段不會發生。
-- `ShipItState.plist` 在 `~/Library/Caches/com.anthropic.claudefordesktop.ShipIt/`，同 bundle id 共用：複本下載更新時會把狀態改成指向自己，蓋掉原本 App 排好的安裝；原本 App 下次檢查更新（約 20 分鐘到 1 小時）會重新排。帶 `Icon\r` 的複本能否被 ShipIt 成功更新未驗證；失敗也無妨，AspaceI 會在原本 App 更新後重新複製。
+- `ShipItState.plist` 在 `~/Library/Caches/com.anthropic.claudefordesktop.ShipIt/`，同 bundle id 共用：複本下載更新時會把狀態改成指向自己，蓋掉原本 App 排好的安裝；原本 App 下次檢查更新（約 20 分鐘到 1 小時）會重新排。帶 `Icon\r` 的複本能否被 ShipIt 成功更新未驗證；失敗也無妨，任何一份更新後其他複本都會從它重做。
 - 刪除實例時一併刪除複本資料夾（可重建的衍生資料，不進垃圾桶）。
 
 2026-10-09 實測：以正式程式碼建立 Claude 與 VS Code 複本，用測試資料夾開啟後 Dock 顯示帶字樣的圖示，簽章驗證通過、沒有跳鑰匙圈詢問。

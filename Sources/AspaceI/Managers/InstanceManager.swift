@@ -20,7 +20,7 @@ final class InstanceManager {
 
     private(set) var instances: [Instance] = []
     private(set) var switchingPlatform: PlatformKind?
-    /// 原本 App 的更新程式被「直接從原本 App 執行的非預設實例」擋住的平台。
+    /// 需要一起更新的平台：有更新程式在等，或有執行中的實例不是同平台最新版。
     private(set) var pendingUpdatePlatforms: Set<PlatformKind> = []
     private(set) var updatingPlatform: PlatformKind?
     private(set) var removingInstanceIDs: Set<UUID> = []
@@ -153,24 +153,20 @@ final class InstanceManager {
         throw timeoutError
     }
 
-    /// 關閉這個 App 的所有實例讓更新程式換掉 App，再把原本開著的實例重新開回來。
-    /// 更新程式等不到所有程序結束就不會安裝；任何一個實例開著，App 自己為了更新而結束的那個實例就回不來。
+    /// 一起更新：關閉這個 App 的所有實例，等原本的 App 與各複本的更新程式裝完，再把原本開著的實例開回來。
+    /// 開回來時複本一律換成同平台版本最新的那份，所以不論是哪一份先拿到更新，全部會對齊到同一版。
+    /// 原本的 App 只有預設實例自己的更新程式能換，複本較新時預設實例會晚一步。
     func updateAndRelaunch(_ platform: PlatformKind, accounts: AccountManager) async {
         guard updatingPlatform == nil, let group = groups.first(where: { $0.platform == platform }), group.isInstalled else { return }
         updatingPlatform = platform
         defer { updatingPlatform = nil }
         let appPath = group.defaultInstance.executablePath
         let processes = await processList()
-        // 只有從原本 App 執行的程序會擋住更新；用複本的實例不用關。
-        let originalMarker = InstanceService.originalExecutableMarker(appPath: appPath)
-        let running = group.all.filter { instance in
-            InstanceService.mainProcessIDs(for: instance, isDefault: isDefault(instance), in: processes)
-                .contains { processes[$0]?.contains(originalMarker) == true && !AppCloneService.isClonePath(processes[$0] ?? "") }
-        }
+        let running = group.all.filter { !InstanceService.mainProcessIDs(for: $0, isDefault: isDefault($0), in: processes).isEmpty }
         var failure: Error?
         do {
             try await quit(running, timeoutError: .updateQuitTimedOut)
-            try await waitForUpdater(appPath: appPath)
+            try await waitForUpdaters(appPath: appPath, cloneFolders: cloneFolders(for: platform))
         } catch {
             failure = error
         }
@@ -184,9 +180,9 @@ final class InstanceManager {
     }
 
     /// 安裝通常幾秒內完成；等到 60 秒還在就放棄，讓使用者至少拿回實例。
-    private func waitForUpdater(appPath: String) async throws {
+    private func waitForUpdaters(appPath: String, cloneFolders: Set<String>) async throws {
         for _ in 0..<120 {
-            if InstanceService.updaterProcessIDs(appPath: appPath, in: await processList()).isEmpty { return }
+            if InstanceService.updaterProcessIDs(appPath: appPath, cloneFolders: cloneFolders, in: await processList()).isEmpty { return }
             try await Task.sleep(for: .milliseconds(500))
         }
         throw InstanceError.updateTimedOut
@@ -225,25 +221,71 @@ final class InstanceManager {
         }
     }
 
-    /// 複本檔名為「App 名稱 - 使用者名稱」，圖示右下角為使用者名稱前兩字；不知道帳號時用實例名稱。
+    /// 複本檔名為「App 名稱 - 使用者名稱」，圖示右下角為與 menu bar 相同的三字短名稱；不知道帳號時用實例名稱。
     private func prepareClone(for instance: Instance, accounts: AccountManager) throws -> URL {
-        let user = accountLabel(for: instance, accounts: accounts) ?? instance.name
-        let source = URL(fileURLWithPath: instance.executablePath)
+        let account = account(for: instance, accounts: accounts)
+        let original = URL(fileURLWithPath: instance.executablePath)
         return try clones.prepare(
-            source: source,
+            source: newestBundle(for: instance.platform, original: original),
+            original: original,
             instance: instance,
-            title: "\(source.deletingPathExtension().lastPathComponent) - \(user)",
-            badge: InstanceIconRenderer.badgeText(for: user)
+            title: "\(original.deletingPathExtension().lastPathComponent) - \(account?.label ?? instance.name)",
+            badge: shortLabel(for: instance, account: account, accounts: accounts)
         )
     }
 
-    private func accountLabel(for instance: Instance, accounts: AccountManager) -> String? {
+    private func account(for instance: Instance, accounts: AccountManager) -> Account? {
         if instance.platform == .claude {
             guard let uuid = service.claudeSignedInAccountUUID(for: instance, isDefault: false) else { return nil }
-            return accounts.accounts.first { $0.platform == .claude && $0.accountUUID == uuid }?.label
+            return accounts.accounts.first { $0.platform == .claude && $0.accountUUID == uuid }
         }
         guard let accountID = instance.accountID else { return nil }
-        return accounts.accounts.first { $0.id == accountID }?.label
+        return accounts.accounts.first { $0.id == accountID }
+    }
+
+    /// 帳號的短名稱與 menu bar 一樣，只在所有帳號之間比；沒帳號的實例用實例名稱，與帳號和其他這類實例一起比。
+    private func shortLabel(for instance: Instance, account: Account?, accounts: AccountManager) -> String {
+        let accountLabels = accounts.accounts.map(\.label)
+        if let account, let index = accounts.accounts.firstIndex(where: { $0.id == account.id }) {
+            return ShortLabel.labels(for: accountLabels)[index]
+        }
+        let unbound = instances.filter { $0.id == instance.id || self.account(for: $0, accounts: accounts) == nil }
+        let labels = ShortLabel.labels(for: accountLabels + unbound.map(\.name))
+        guard let index = unbound.firstIndex(where: { $0.id == instance.id }) else { return String(instance.name.prefix(ShortLabel.length)) }
+        return labels[accountLabels.count + index]
+    }
+
+    private func cloneFolders(for platform: PlatformKind) -> Set<String> {
+        Set(instances.filter { $0.platform == platform }.map { AppCloneService.folderName(for: $0.id) })
+    }
+
+    /// 原本的 App 與同平台所有複本中版本最新的那份；同版時用原本的 App。
+    private func newestBundle(for platform: PlatformKind, original: URL) -> URL {
+        var candidates = [(url: original, version: AppCloneService.bundleVersion(of: original))]
+        for instance in instances where instance.platform == platform {
+            do {
+                candidates += try clones.bundles(for: instance.id).map { ($0, AppCloneService.bundleVersion(of: $0)) }
+            } catch {
+                logger.error("InstanceManager.newestBundle | 讀取 \(instance.name, privacy: .public) 的複本失敗：\(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return AppCloneService.newest(candidates) ?? original
+    }
+
+    /// 有更新程式在等，或有執行中的實例比同平台最新版舊（別的複本或原本的 App 已經更新過）。
+    private func needsUpdate(_ group: Group, processes: [Int32: String]) -> Bool {
+        let appPath = group.defaultInstance.executablePath
+        if !InstanceService.updaterProcessIDs(appPath: appPath, cloneFolders: cloneFolders(for: group.platform), in: processes).isEmpty {
+            return true
+        }
+        guard let newest = AppCloneService.bundleVersion(of: newestBundle(for: group.platform, original: URL(fileURLWithPath: appPath))) else { return false }
+        return group.all.contains { instance in
+            InstanceService.mainProcessIDs(for: instance, isDefault: isDefault(instance), in: processes).contains { pid in
+                guard let command = processes[pid], let bundle = InstanceService.bundlePath(fromCommand: command),
+                      let version = AppCloneService.bundleVersion(of: URL(fileURLWithPath: bundle)) else { return false }
+                return version.compare(newest, options: .numeric) == .orderedAscending
+            }
+        }
     }
 
     /// 複本被它自己的更新程式重開時不帶任何參數，開到的是預設資料夾而不是這個實例。
@@ -294,10 +336,7 @@ final class InstanceManager {
         var signedIn: [UUID: String] = [:]
         var pendingUpdates: Set<PlatformKind> = []
         for group in groups {
-            let appPath = group.defaultInstance.executablePath
-            if group.isInstalled,
-               !InstanceService.updaterProcessIDs(appPath: appPath, in: processes).isEmpty,
-               InstanceService.hasInstanceRunningFromOriginal(appPath: appPath, in: processes) {
+            if group.isInstalled, needsUpdate(group, processes: processes) {
                 pendingUpdates.insert(group.platform)
             }
             for instance in group.all {

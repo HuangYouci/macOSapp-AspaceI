@@ -37,6 +37,14 @@ struct MenuBarQuotaItemTests {
         #expect(items.first?.name == "Cod")
     }
 
+    @Test("短名稱在所有帳號之間比：選單只選一個也要跟沒選到的撞名帳號區分")
+    func disambiguatesAgainstAllAccounts() {
+        let work = account(.claude, email: "huangwork@x.com", windows: [])
+        let home = account(.codex, email: "huanghome@y.com", windows: [])
+        let items = MenuBarQuotaItem.items(accounts: [work, home], selectedIDs: [home.id])
+        #expect(items.map(\.name) == ["huh"])
+    }
+
     @Test("最多三個，已刪除的帳號略過")
     func limitsToThreeAndSkipsMissing() {
         let accounts = (0..<4).map { _ in account(.codex, email: nil, windows: []) }

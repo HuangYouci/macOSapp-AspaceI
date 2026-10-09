@@ -12,8 +12,9 @@ final class AppCloneService: Sendable {
     static let rootPathComponent = "AspaceI/Apps.noindex"
 
     /// 準備好這次要啟動的複本並回傳路徑；只在實例沒有執行時呼叫。
+    /// `source` 是同平台版本最新的那份（原本的 App 或別的實例的複本），`original` 是原本的 App，圖示以它為底。
     @MainActor
-    func prepare(source: URL, instance: Instance, title: String, badge: String) throws -> URL {
+    func prepare(source: URL, original: URL, instance: Instance, title: String, badge: String) throws -> URL {
         let directory = try directory(for: instance.id)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let target = directory.appending(path: "\(Self.sanitizedFileName(title)).app", directoryHint: .isDirectory)
@@ -33,9 +34,28 @@ final class AppCloneService: Sendable {
         } else {
             try Self.clone(source, to: target)
         }
-        let icon = InstanceIconRenderer.icon(base: NSWorkspace.shared.icon(forFile: source.path), badge: badge)
+        let icon = InstanceIconRenderer.icon(base: NSWorkspace.shared.icon(forFile: original.path), badge: badge)
         guard NSWorkspace.shared.setIcon(icon, forFile: target.path, options: []) else { throw AppCloneError.iconFailed }
         return target
+    }
+
+    /// 該實例資料夾內的所有 App（正常只有一份；複本自己更新後可能多一份改回原名的）。
+    func bundles(for id: UUID) throws -> [URL] {
+        let directory = try directory(for: id)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "app" }
+    }
+
+    /// 版本最新的那份；同版本時取排在前面的（呼叫端把原本的 App 放第一個）。
+    static func newest(_ candidates: [(url: URL, version: String?)]) -> URL? {
+        var best: (url: URL, version: String)?
+        for candidate in candidates {
+            guard let version = candidate.version else { continue }
+            if let current = best, version.compare(current.version, options: .numeric) != .orderedDescending { continue }
+            best = (candidate.url, version)
+        }
+        return best?.url
     }
 
     func remove(for id: UUID) throws {

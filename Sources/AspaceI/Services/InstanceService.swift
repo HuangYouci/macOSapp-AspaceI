@@ -124,23 +124,24 @@ final class InstanceService: Sendable {
         return !prefix.contains("/Contents/") && !prefix.contains("'") && !prefix.contains("\"")
     }
 
-    /// 是否有非預設實例直接從原本的 App 執行（尚未改用複本前開的）。這種實例會讓原本 App 的更新程式一直等下去。
-    static func hasInstanceRunningFromOriginal(appPath: String, in processes: [Int32: String]) -> Bool {
-        let marker = originalExecutableMarker(appPath: appPath)
-        return processes.values.contains { command in
-            command.contains(marker) && command.contains("--user-data-dir") && isMainExecutable(command) && !AppCloneService.isClonePath(command)
-        }
+    /// 主程序命令列所屬的 App 路徑（到 `.app` 為止）。
+    static func bundlePath(fromCommand command: String) -> String? {
+        guard isMainExecutable(command), let range = command.range(of: ".app/Contents/MacOS/") else { return nil }
+        return String(command[..<range.lowerBound]) + ".app"
     }
 
-    /// App 自己的更新程式（Squirrel 的 ShipIt、Sparkle 的 Autoupdate）是否在等待原本的 App 安裝。
-    /// Squirrel 只等同一個路徑的程序結束才換掉 App；非預設實例改用複本後只剩預設實例會擋住它。
-    static func updaterProcessIDs(appPath: String, in processes: [Int32: String]) -> [Int32] {
+    /// App 自己的更新程式（Squirrel 的 ShipIt、Sparkle 的 Autoupdate）是否在等待安裝：原本的 App，
+    /// 以及 `cloneFolders` 這些實例的複本。Squirrel 只等同一個路徑的程序結束才換掉 App。
+    static func updaterProcessIDs(appPath: String, cloneFolders: Set<String> = [], in processes: [Int32: String]) -> [Int32] {
         let app = "/\(URL(fileURLWithPath: appPath).lastPathComponent)/Contents/Frameworks/"
         return processes.compactMap { pid, command in
-            guard !AppCloneService.isClonePath(command) else { return nil }
-            let isShipIt = command.contains(app + "Squirrel.framework/Resources/ShipIt")
-            let isSparkle = command.contains(app + "Sparkle.framework/") && command.contains("/Autoupdate")
-            return isShipIt || isSparkle ? pid : nil
+            let isShipIt = command.contains("/Contents/Frameworks/Squirrel.framework/Resources/ShipIt")
+            let isSparkle = command.contains("/Contents/Frameworks/Sparkle.framework/") && command.contains("/Autoupdate")
+            guard isShipIt || isSparkle else { return nil }
+            if let folder = AppCloneService.instanceFolder(inPath: command) {
+                return cloneFolders.contains(folder) ? pid : nil
+            }
+            return command.contains(app) ? pid : nil
         }
         .sorted()
     }

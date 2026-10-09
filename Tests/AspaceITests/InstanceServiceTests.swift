@@ -64,15 +64,12 @@ struct InstanceServiceTests {
         """)
         #expect(InstanceService.mainProcessIDs(for: claude, isDefault: false, in: list) == [1])
         #expect(InstanceService.mainProcessIDs(for: claude, isDefault: true, in: list) == [4])
-        #expect(!InstanceService.hasInstanceRunningFromOriginal(appPath: "/Applications/Claude.app", in: list))
-        let legacy = InstanceService.parseProcessList("""
-          7 /Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/p/claude
-          8 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --user-data-dir=/p/claude
-        """)
-        #expect(InstanceService.hasInstanceRunningFromOriginal(appPath: "/Applications/Claude.app", in: legacy))
+        #expect(InstanceService.bundlePath(fromCommand: list[1] ?? "") == "\(root)/Claude - yc.app")
+        #expect(InstanceService.bundlePath(fromCommand: list[2] ?? "") == nil)
+        #expect(InstanceService.bundlePath(fromCommand: list[6] ?? "") == nil)
     }
 
-    @Test("偵測等待安裝的 ShipIt 與 Sparkle，只認同一個 App 的，不認 Helper 或別的 App")
+    @Test("偵測等待安裝的 ShipIt 與 Sparkle：原本的 App 加上指定實例的複本，不認 Helper、別的 App、別的實例")
     func detectsPendingUpdaters() {
         let list = InstanceService.parseProcessList("""
           10 /Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/p/claude
@@ -85,6 +82,8 @@ struct InstanceServiceTests {
           50 /u/Library/Application Support/AspaceI/Apps.noindex/1cbfe5af/Claude.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt y
         """)
         #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/Claude.app", in: list) == [11])
+        #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/Claude.app", cloneFolders: ["1cbfe5af"], in: list) == [11, 50])
+        #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/Claude.app", cloneFolders: ["ffffffff"], in: list) == [11])
         #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/ChatGPT.app", in: list) == [20])
         #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/Visual Studio Code.app", in: list).isEmpty)
     }

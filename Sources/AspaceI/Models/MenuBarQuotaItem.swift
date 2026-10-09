@@ -9,13 +9,16 @@ struct MenuBarQuotaItem: Equatable, Identifiable, Sendable {
     let percentages: [String]
 
     /// 依使用者選取順序組出 menu bar 項目；已刪除的帳號直接略過。
+    /// 短名稱在所有帳號之間比（不只選到的），同一個帳號在 menu bar 與實例圖示上永遠是同一個。
     static func items(accounts: [Account], selectedIDs: [UUID]) -> [MenuBarQuotaItem] {
-        selectedIDs.prefix(limit).compactMap { id in
-            guard let account = accounts.first(where: { $0.id == id }) else { return nil }
+        let names = ShortLabel.labels(for: accounts.map(\.label))
+        return selectedIDs.prefix(limit).compactMap { id in
+            guard let index = accounts.firstIndex(where: { $0.id == id }) else { return nil }
+            let account = accounts[index]
             return MenuBarQuotaItem(
                 id: account.id,
                 platform: account.platform,
-                name: String(account.label.prefix(3)),
+                name: names[index],
                 percentages: percentages(for: account)
             )
         }
