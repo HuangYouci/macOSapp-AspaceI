@@ -2,7 +2,7 @@
 
 AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex、Antigravity 的多個帳號：看額度、切換帳號、用不同帳號同時開多個 App 實例。
 
-- 選單列最多同時顯示 3 個帳號的額度：`{icon} abc 12% 40% | …`
+- 選單列最多同時顯示 3 個帳號的額度：`{icon} abc 12% 40% | …`（`abc` 為三字短名稱）
 - 不建立主視窗、不顯示 Dock 圖示
 - 憑證只存在這台 Mac 的 Keychain，沒有 AspaceI 自己的伺服器
 
@@ -47,6 +47,12 @@ AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex
 ### 實例
 
 依 VS Code、Antigravity、Claude、Codex 分組。每組第一個是預設實例（就是平常打開的 App），可另外新增實例，各自使用獨立的資料夾與帳號，同時執行互不干擾。
+
+新增的實例會以一份 App 複本開啟，Dock 圖示右下角標上與選單列相同的三字短名稱，用來分辨同時開著的多個 Claude／Codex。滑鼠移到 Dock 圖示上會顯示「App 名稱 - 帳號名稱」。複本不修改 App 內容、不重新簽署。
+
+App 有更新、或某個實例已經比其他的新時，該組會出現「更新並重開」，按下後同一個 App 的實例全部關閉、更新，再以同一版開回來。
+
+短名稱取帳號名稱前三字；前三字和別的帳號相同時，保留前兩字、第三字改取第一個不同的字，完全相同則改為 1、2、3。
 
 實例資料位於 `~/Library/Application Support/AspaceI/Instances/`。
 
@@ -105,6 +111,7 @@ cp -R dist/AspaceI.app /Applications/
 | Token、refresh token | Keychain：`com.huangyouci.AspaceI` / `credentials-vault` |
 | 帳號清單、額度快取 | `~/Library/Application Support/AspaceI/` |
 | 實例設定與資料夾 | `~/Library/Application Support/AspaceI/` |
+| 實例用的 App 複本 | `~/Library/Application Support/AspaceI/Apps.noindex/` |
 
 完整移除：結束 App、刪除 `/Applications/AspaceI.app` 與上述資料夾，並在「鑰匙圈存取」刪除 `com.huangyouci.AspaceI` 項目。
 

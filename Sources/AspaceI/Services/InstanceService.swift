@@ -27,15 +27,16 @@ final class InstanceService: Sendable {
         try JSONEncoder().encode(store).write(to: try storeURL(), options: [.atomic, .completeFileProtection])
     }
 
-    /// 以 `open` 啟動桌面 App；預設實例沿用系統既有視窗，其他實例強制開新程序並指定獨立資料夾。
-    func launch(_ instance: Instance, isDefault: Bool) throws {
-        guard FileManager.default.fileExists(atPath: instance.executablePath) else { throw InstanceError.executableMissing }
+    /// 以 `open -n` 啟動桌面 App；其他實例另外指定獨立資料夾。只在實例沒有執行時呼叫。
+    /// `appPath` 是這次要開的 App：預設實例為原本的 App，其他實例為 `AppCloneService` 的複本。
+    func launch(_ instance: Instance, appPath: String, isDefault: Bool) throws {
+        guard FileManager.default.fileExists(atPath: appPath) else { throw InstanceError.executableMissing }
         if !isDefault {
             try FileManager.default.createDirectory(atPath: instance.profileDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = Self.openArguments(for: instance, isDefault: isDefault)
+        process.arguments = Self.openArguments(for: instance, appPath: appPath, isDefault: isDefault)
         // open 會把自己的環境變數轉交給 App；DYLD_* 會讓 VS Code 啟動即結束。
         process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("DYLD_") }
         process.standardOutput = FileHandle.nullDevice
@@ -45,8 +46,9 @@ final class InstanceService: Sendable {
         guard process.terminationStatus == 0 else { throw InstanceError.launchFailed }
     }
 
-    static func openArguments(for instance: Instance, isDefault: Bool) -> [String] {
-        guard !isDefault else { return ["-a", instance.executablePath] + (instance.arguments.isEmpty ? [] : ["--args"] + instance.arguments) }
+    static func openArguments(for instance: Instance, appPath: String, isDefault: Bool) -> [String] {
+        // 預設實例也要 -n：同一個 App 已有其他實例在跑時，沒有 -n 的 open 只會把其中一個叫到前面，預設實例根本沒開。
+        guard !isDefault else { return ["-n", "-a", appPath] + (instance.arguments.isEmpty ? [] : ["--args"] + instance.arguments) }
         let userDataDirectory = userDataDirectory(for: instance)
         var arguments = ["-n"]
         if instance.platform == .codex {
@@ -55,7 +57,7 @@ final class InstanceService: Sendable {
         }
         // 必須用等號形式：Claude 會忽略空格分開的寫法，改用預設資料夾。
         let appArguments = ["--user-data-dir=\(userDataDirectory)"] + instance.arguments
-        return arguments + ["-a", instance.executablePath, "--args"] + appArguments
+        return arguments + ["-a", appPath, "--args"] + appArguments
     }
 
     static func userDataDirectory(for instance: Instance) -> String {
@@ -89,20 +91,57 @@ final class InstanceService: Sendable {
         return result
     }
 
-    /// 找出屬於該實例的主程序：主執行檔在 App 的 Contents/MacOS 下，並以 user-data-dir 區分實例。
+    /// 找出屬於該實例的主程序。預設實例：原本 App 的主執行檔、沒有 user-data-dir、不在複本資料夾。
     /// 只比對 App 名稱而非完整路徑，因為隔離中的 App 會從 AppTranslocation 的暫存路徑執行。
+    /// 其他實例：任何 App 的主執行檔（原本的或複本，複本檔名會變）且 user-data-dir 相符。
     static func mainProcessIDs(for instance: Instance, isDefault: Bool, in processes: [Int32: String]) -> [Int32] {
-        let executableMarker = "/\(URL(fileURLWithPath: instance.executablePath).lastPathComponent)/Contents/MacOS/"
+        let executableMarker = originalExecutableMarker(appPath: instance.executablePath)
         let directory = userDataDirectory(for: instance)
         return processes.compactMap { pid, command in
-            guard command.contains(executableMarker) else { return nil }
             let hasUserDataDir = command.contains("--user-data-dir")
-            if isDefault { return hasUserDataDir ? nil : pid }
+            if isDefault {
+                return command.contains(executableMarker) && isMainExecutable(command) && !hasUserDataDir && !AppCloneService.isClonePath(command) ? pid : nil
+            }
+            guard isMainExecutable(command) else { return nil }
             let matches = ["--user-data-dir=\(directory)", "--user-data-dir \(directory)"].contains { marker in
                 guard let found = command.range(of: marker) else { return false }
                 return found.upperBound == command.endIndex || command[found.upperBound] == " "
             }
             return matches ? pid : nil
+        }
+        .sorted()
+    }
+
+    static func originalExecutableMarker(appPath: String) -> String {
+        "/\(URL(fileURLWithPath: appPath).lastPathComponent)/Contents/MacOS/"
+    }
+
+    /// 命令列的執行檔是某個 App 的主執行檔，不是包在 `Contents/Frameworks` 等處的 Helper，
+    /// 也不是把它當參數的別的程式（VS Code 啟動時會跑 `/bin/zsh -i -l -c '…/Code'` 讀 shell 環境）。
+    static func isMainExecutable(_ command: String) -> Bool {
+        guard let range = command.range(of: ".app/Contents/MacOS/") else { return false }
+        let prefix = command[..<range.lowerBound]
+        return !prefix.contains("/Contents/") && !prefix.contains("'") && !prefix.contains("\"")
+    }
+
+    /// 主程序命令列所屬的 App 路徑（到 `.app` 為止）。
+    static func bundlePath(fromCommand command: String) -> String? {
+        guard isMainExecutable(command), let range = command.range(of: ".app/Contents/MacOS/") else { return nil }
+        return String(command[..<range.lowerBound]) + ".app"
+    }
+
+    /// App 自己的更新程式（Squirrel 的 ShipIt、Sparkle 的 Autoupdate）是否在等待安裝：原本的 App，
+    /// 以及 `cloneFolders` 這些實例的複本。Squirrel 只等同一個路徑的程序結束才換掉 App。
+    static func updaterProcessIDs(appPath: String, cloneFolders: Set<String> = [], in processes: [Int32: String]) -> [Int32] {
+        let app = "/\(URL(fileURLWithPath: appPath).lastPathComponent)/Contents/Frameworks/"
+        return processes.compactMap { pid, command in
+            let isShipIt = command.contains("/Contents/Frameworks/Squirrel.framework/Resources/ShipIt")
+            let isSparkle = command.contains("/Contents/Frameworks/Sparkle.framework/") && command.contains("/Autoupdate")
+            guard isShipIt || isSparkle else { return nil }
+            if let folder = AppCloneService.instanceFolder(inPath: command) {
+                return cloneFolders.contains(folder) ? pid : nil
+            }
+            return command.contains(app) ? pid : nil
         }
         .sorted()
     }
@@ -170,7 +209,7 @@ final class InstanceService: Sendable {
 }
 
 enum InstanceError: LocalizedError {
-    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut, removeQuitTimedOut
+    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut, removeQuitTimedOut, updateQuitTimedOut, updateTimedOut
     var errorDescription: String? {
         switch self {
         case .executableMissing: "找不到 App"
@@ -178,6 +217,8 @@ enum InstanceError: LocalizedError {
         case .launchFailed: "App 啟動失敗"
         case .quitTimedOut: "App 沒有在時間內關閉，未切換帳號"
         case .removeQuitTimedOut: "App 沒有在時間內關閉，未刪除實例"
+        case .updateQuitTimedOut: "App 沒有在時間內關閉，未更新"
+        case .updateTimedOut: "更新沒有在時間內完成"
         }
     }
 }
