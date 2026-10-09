@@ -150,7 +150,7 @@ Dock 顯示的是程序所屬 bundle 的圖示，執行中無法從外部改（2
 - 圖示：原本 App 的圖示（不是複本的，複本已帶標籤）右下角疊深色膠囊與三字短名稱（`InstanceIconRenderer`、`ShortLabel`）。帳號：Claude 取實例 `config.json` 辨識到的帳號，Codex 取綁定的帳號，短名稱與 menu bar 相同；不知道帳號時用實例名稱，與所有帳號及其他這類實例一起比。每次啟動都重畫，帳號變了下次啟動就會更新。
 - 原本 App 帶 `com.apple.quarantine` 時（實測 VS Code 有）複本會移除它：原版已經過使用者確認，複本換了位置會被再問一次或改從暫存路徑執行。
 - 版本：實例資料夾內版本最新的複本若不比來源舊就沿用（改回實例名稱；ShipIt 可能把檔名改回 `Claude.app`），否則刪掉從來源重做。版本直接讀 Info.plist，`Bundle(url:)` 依路徑快取會回舊值。
-- **Dock 名稱改不了**：滑鼠移到圖示上仍是 `Claude`（`CFBundleName`），要改就得改 Info.plist、簽章失效，回到重簽的代價（`keychain-access-groups` 等受限權限、library validation、TCC）。檔名只在 Finder 看得到。
+- 名稱：Dock 滑鼠移上去的標籤是複本的**檔名**（`Claude - <使用者名稱>`），2026-10-09 使用者實際確認。`NSRunningApplication.localizedName`／`lsappinfo` 回報的仍是 `CFBundleName`（`Claude`），不能拿來判斷 Dock 顯示什麼；App 自己的選單列名稱也仍是 `Claude`。
 - `claude://` 的預設處理者仍是 `/Applications/Claude.app`，複本只是候選。
 - 複本更新：ShipIt 安裝完重開時不帶參數，開到預設資料夾。`InstanceManager.startMonitoring` 監看 `didLaunchApplicationNotification`，在複本資料夾內、命令列沒有 `--user-data-dir` 的程序一律關掉，改以實例資料夾重開（順便把檔名與圖示改回來）。AspaceI 沒在執行時這段不會發生。
 - `ShipItState.plist` 在 `~/Library/Caches/com.anthropic.claudefordesktop.ShipIt/`，同 bundle id 共用：複本下載更新時會把狀態改成指向自己，蓋掉原本 App 排好的安裝；原本 App 下次檢查更新（約 20 分鐘到 1 小時）會重新排。帶 `Icon\r` 的複本能否被 ShipIt 成功更新未驗證；失敗也無妨，任何一份更新後其他複本都會從它重做。
