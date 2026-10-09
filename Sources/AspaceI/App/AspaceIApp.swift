@@ -37,6 +37,7 @@ struct AspaceIApp: App {
         } label: {
             MenuBarLabel(items: MenuBarQuotaItem.items(accounts: accountManager.accounts, selectedIDs: settingsManager.menuBarAccountIDs))
                 .task {
+                    instanceManager.startMonitoring(accounts: accountManager)
                     await accountManager.autoImportLocalAccounts()
                     accountManager.startAutomaticRefresh()
                 }

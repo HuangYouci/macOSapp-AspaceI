@@ -16,15 +16,20 @@ struct InstanceServiceTests {
 
     @Test("非預設實例開新程序並隔離資料夾；Codex 另設 CODEX_HOME")
     func buildsOpenArguments() {
-        #expect(InstanceService.openArguments(for: codex, isDefault: false) == [
+        #expect(InstanceService.openArguments(for: codex, appPath: codex.executablePath, isDefault: false) == [
             "-n", "--env", "CODEX_HOME=/p/codex", "--env", "CODEX_ELECTRON_USER_DATA_PATH=/p/codex/app-data",
             "-a", "/Applications/Codex.app", "--args", "--user-data-dir=/p/codex/app-data"
         ])
-        #expect(InstanceService.openArguments(for: vscode, isDefault: false) == [
+        #expect(InstanceService.openArguments(for: vscode, appPath: vscode.executablePath, isDefault: false) == [
             "-n", "-a", "/Applications/Visual Studio Code.app", "--args", "--user-data-dir=/p/vscode"
         ])
         // 預設實例也要 -n，否則其他實例在跑時 open 只會把其中一個叫到前面。
-        #expect(InstanceService.openArguments(for: vscode, isDefault: true) == ["-n", "-a", "/Applications/Visual Studio Code.app"])
+        #expect(InstanceService.openArguments(for: vscode, appPath: vscode.executablePath, isDefault: true) == ["-n", "-a", "/Applications/Visual Studio Code.app"])
+        // 非預設實例開的是複本，資料夾參數不變。
+        let clone = "/u/Library/Application Support/AspaceI/Apps.noindex/ab12cd34/Visual Studio Code - yc.app"
+        #expect(InstanceService.openArguments(for: vscode, appPath: clone, isDefault: false) == [
+            "-n", "-a", clone, "--args", "--user-data-dir=/p/vscode"
+        ])
     }
 
     @Test("依主執行檔與 user-data-dir 區分預設與獨立實例，忽略 Helper 程序")
@@ -45,6 +50,28 @@ struct InstanceServiceTests {
         #expect(InstanceService.mainProcessIDs(for: translocated, isDefault: false, in: list) == [505])
     }
 
+    @Test("複本：非預設實例不管 App 檔名只認資料夾；被裸開的複本不算預設實例；Helper 與 Claude Code 子程序不算")
+    func matchesCloneProcesses() {
+        let claude = Instance(name: "1-big", platform: .claude, profileDirectory: "/p/claude", executablePath: "/Applications/Claude.app")
+        let root = "/u/Library/Application Support/AspaceI/Apps.noindex/1cbfe5af"
+        let list = InstanceService.parseProcessList("""
+          1 \(root)/Claude - yc.app/Contents/MacOS/Claude --user-data-dir=/p/claude
+          2 \(root)/Claude - yc.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=gpu-process --user-data-dir=/p/claude
+          3 \(root)/Claude.app/Contents/MacOS/Claude
+          4 /Applications/Claude.app/Contents/MacOS/Claude
+          5 /p/claude/claude-code/2.1/x/claude.app/Contents/MacOS/claude --output-format stream-json
+          6 /bin/zsh -i -l -c '/Applications/Claude.app/Contents/MacOS/Claude' -p 'x'
+        """)
+        #expect(InstanceService.mainProcessIDs(for: claude, isDefault: false, in: list) == [1])
+        #expect(InstanceService.mainProcessIDs(for: claude, isDefault: true, in: list) == [4])
+        #expect(!InstanceService.hasInstanceRunningFromOriginal(appPath: "/Applications/Claude.app", in: list))
+        let legacy = InstanceService.parseProcessList("""
+          7 /Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/p/claude
+          8 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --user-data-dir=/p/claude
+        """)
+        #expect(InstanceService.hasInstanceRunningFromOriginal(appPath: "/Applications/Claude.app", in: legacy))
+    }
+
     @Test("偵測等待安裝的 ShipIt 與 Sparkle，只認同一個 App 的，不認 Helper 或別的 App")
     func detectsPendingUpdaters() {
         let list = InstanceService.parseProcessList("""
@@ -55,6 +82,7 @@ struct InstanceServiceTests {
           22 /Applications/ChatGPT.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader
           30 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper --type=renderer
           40 /Applications/Claude Beta.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt x
+          50 /u/Library/Application Support/AspaceI/Apps.noindex/1cbfe5af/Claude.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt y
         """)
         #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/Claude.app", in: list) == [11])
         #expect(InstanceService.updaterProcessIDs(appPath: "/Applications/ChatGPT.app", in: list) == [20])

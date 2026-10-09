@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable
@@ -18,7 +20,7 @@ final class InstanceManager {
 
     private(set) var instances: [Instance] = []
     private(set) var switchingPlatform: PlatformKind?
-    /// App 自己的更新程式正在等所有程序結束的平台。
+    /// 原本 App 的更新程式被「直接從原本 App 執行的非預設實例」擋住的平台。
     private(set) var pendingUpdatePlatforms: Set<PlatformKind> = []
     private(set) var updatingPlatform: PlatformKind?
     private(set) var removingInstanceIDs: Set<UUID> = []
@@ -29,6 +31,10 @@ final class InstanceManager {
 
     private let service = InstanceService.shared
     private let locator = ExecutableLocatorService.shared
+    private let clones = AppCloneService.shared
+    private let logger = Logger(subsystem: "com.huangyouci.AspaceI", category: "Instances")
+    @ObservationIgnored private weak var monitoredAccounts: AccountManager?
+    @ObservationIgnored private var launchObserver: NSObjectProtocol?
 
     init() {
         do {
@@ -115,7 +121,7 @@ final class InstanceManager {
             }
             try await accounts.switchDefaultClient(to: account)
             if !instance.executablePath.isEmpty {
-                try service.launch(instance, isDefault: true)
+                try service.launch(instance, appPath: instance.executablePath, isDefault: true)
                 scheduleRunningRefresh()
             }
             errorMessage = nil
@@ -155,7 +161,12 @@ final class InstanceManager {
         defer { updatingPlatform = nil }
         let appPath = group.defaultInstance.executablePath
         let processes = await processList()
-        let running = group.all.filter { !InstanceService.mainProcessIDs(for: $0, isDefault: isDefault($0), in: processes).isEmpty }
+        // 只有從原本 App 執行的程序會擋住更新；用複本的實例不用關。
+        let originalMarker = InstanceService.originalExecutableMarker(appPath: appPath)
+        let running = group.all.filter { instance in
+            InstanceService.mainProcessIDs(for: instance, isDefault: isDefault(instance), in: processes)
+                .contains { processes[$0]?.contains(originalMarker) == true && !AppCloneService.isClonePath(processes[$0] ?? "") }
+        }
         var failure: Error?
         do {
             try await quit(running, timeoutError: .updateQuitTimedOut)
@@ -195,12 +206,77 @@ final class InstanceManager {
                 let data = try accounts.credentialData(for: accountID)
                 try CredentialProjectionService.shared.project(account: account, credentialData: data, to: URL(fileURLWithPath: instance.profileDirectory))
             }
-            try service.launch(instance, isDefault: isDefault)
-            errorMessage = nil
+            var appPath = instance.executablePath
+            var cloneError: Error?
+            if !isDefault {
+                do {
+                    appPath = try prepareClone(for: instance, accounts: accounts).path
+                } catch {
+                    // 複本只影響 Dock 圖示，做不出來就用原本的 App 開，實例照常可用。
+                    logger.error("InstanceManager.launch | 準備實例 App 失敗：\(error.localizedDescription, privacy: .public)")
+                    cloneError = error
+                }
+            }
+            try service.launch(instance, appPath: appPath, isDefault: isDefault)
+            errorMessage = cloneError?.localizedDescription
             scheduleRunningRefresh()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// 複本檔名為「App 名稱 - 使用者名稱」，圖示右下角為使用者名稱前兩字；不知道帳號時用實例名稱。
+    private func prepareClone(for instance: Instance, accounts: AccountManager) throws -> URL {
+        let user = accountLabel(for: instance, accounts: accounts) ?? instance.name
+        let source = URL(fileURLWithPath: instance.executablePath)
+        return try clones.prepare(
+            source: source,
+            instance: instance,
+            title: "\(source.deletingPathExtension().lastPathComponent) - \(user)",
+            badge: InstanceIconRenderer.badgeText(for: user)
+        )
+    }
+
+    private func accountLabel(for instance: Instance, accounts: AccountManager) -> String? {
+        if instance.platform == .claude {
+            guard let uuid = service.claudeSignedInAccountUUID(for: instance, isDefault: false) else { return nil }
+            return accounts.accounts.first { $0.platform == .claude && $0.accountUUID == uuid }?.label
+        }
+        guard let accountID = instance.accountID else { return nil }
+        return accounts.accounts.first { $0.id == accountID }?.label
+    }
+
+    /// 複本被它自己的更新程式重開時不帶任何參數，開到的是預設資料夾而不是這個實例。
+    /// 偵測到就把它關掉，改用實例資料夾重開，順便把被改回原名的複本換回實例名稱與圖示。
+    func startMonitoring(accounts: AccountManager) {
+        monitoredAccounts = accounts
+        guard launchObserver == nil else { return }
+        launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let path = app.bundleURL?.path else { return }
+            let pid = app.processIdentifier
+            Task { @MainActor in await self?.recoverBareClone(pid: pid, bundlePath: path) }
+        }
+    }
+
+    private func recoverBareClone(pid: Int32, bundlePath: String) async {
+        guard let folder = AppCloneService.instanceFolder(inPath: bundlePath),
+              let instance = instances.first(where: { AppCloneService.folderName(for: $0.id) == folder }),
+              let accounts = monitoredAccounts else { return }
+        let command = await processList()[pid]
+        if let command, command.contains("--user-data-dir") { return }
+        logger.notice("InstanceManager.recoverBareClone | \(instance.name, privacy: .public) 的複本被不帶參數開啟，改以實例資料夾重開")
+        if command != nil {
+            service.stop(processIDs: [pid])
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .milliseconds(500))
+                if await processList()[pid] == nil { break }
+            }
+        }
+        guard InstanceService.mainProcessIDs(for: instance, isDefault: false, in: await processList()).isEmpty else { return }
+        launch(instance, accounts: accounts)
     }
 
     func stop(_ instance: Instance) {
@@ -218,7 +294,10 @@ final class InstanceManager {
         var signedIn: [UUID: String] = [:]
         var pendingUpdates: Set<PlatformKind> = []
         for group in groups {
-            if group.isInstalled, !InstanceService.updaterProcessIDs(appPath: group.defaultInstance.executablePath, in: processes).isEmpty {
+            let appPath = group.defaultInstance.executablePath
+            if group.isInstalled,
+               !InstanceService.updaterProcessIDs(appPath: appPath, in: processes).isEmpty,
+               InstanceService.hasInstanceRunningFromOriginal(appPath: appPath, in: processes) {
                 pendingUpdates.insert(group.platform)
             }
             for instance in group.all {
@@ -240,6 +319,7 @@ final class InstanceManager {
         do {
             try await quit(instance, timeoutError: .removeQuitTimedOut)
             try service.trashProfile(for: instance)
+            try clones.remove(for: instance.id)
             instances.removeAll { $0.id == instance.id }
             persist()
             errorMessage = nil

@@ -48,6 +48,8 @@ AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex
 
 依 VS Code、Antigravity、Claude、Codex 分組。每組第一個是預設實例（就是平常打開的 App），可另外新增實例，各自使用獨立的資料夾與帳號，同時執行互不干擾。
 
+新增的實例會以一份 App 複本開啟，Dock 圖示右下角標上帳號名稱前兩字，用來分辨同時開著的多個 Claude／Codex。複本不修改 App 內容、不重新簽署；滑鼠移到 Dock 圖示上顯示的名稱仍是原本的 App 名稱。
+
 實例資料位於 `~/Library/Application Support/AspaceI/Instances/`。
 
 ### 設定
@@ -105,6 +107,7 @@ cp -R dist/AspaceI.app /Applications/
 | Token、refresh token | Keychain：`com.huangyouci.AspaceI` / `credentials-vault` |
 | 帳號清單、額度快取 | `~/Library/Application Support/AspaceI/` |
 | 實例設定與資料夾 | `~/Library/Application Support/AspaceI/` |
+| 實例用的 App 複本 | `~/Library/Application Support/AspaceI/Apps.noindex/` |
 
 完整移除：結束 App、刪除 `/Applications/AspaceI.app` 與上述資料夾，並在「鑰匙圈存取」刪除 `com.huangyouci.AspaceI` 項目。
 

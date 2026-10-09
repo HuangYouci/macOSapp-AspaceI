@@ -2,7 +2,7 @@
 
 最後更新日期：2026-10-09
 
-對應功能／commit：多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：非預設實例改用 App 複本（Dock 圖示右下角標使用者名稱前兩字）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -111,13 +111,13 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 實例一律是桌面 App，依服務分組：VS Code（GitHub Copilot）、Antigravity、Claude、Codex。App 由 `ExecutableLocatorService` 在 `/Applications` 與 `~/Applications` 尋找；未安裝時整組停用。
 
 - 每組第一個是「預設」實例：不存檔、不可刪除，id 依平台固定。以 `open -n -a` 開啟系統原本的 App 設定。`-n` 不能省：同一個 App 已有其他實例在跑時，沒有 `-n` 的 `open` 只會把其中一個（不一定是哪個）叫到前面，預設實例根本沒開（2026-10-09 使用者回報「再開啟不一定是我要的 Instance」）。啟動只在實例沒有執行時發生；萬一狀態過期多開了一個，Electron 的單一實例鎖會讓它把焦點交給原本那個後自行結束。
-- 其他實例以 `open -n -a <App> --args --user-data-dir=<資料夾>` 開新程序（2026-09-14 四平台實測）：
+- 其他實例以 `open -n -a <複本> --args --user-data-dir=<資料夾>` 開新程序（2026-09-14 四平台實測；複本見下方「非預設實例的 App 名稱與圖示」）：
   - 必須用等號形式；Claude 會忽略空格分開的寫法，改用預設資料夾。
   - Codex（ChatGPT.app）另以 `--env CODEX_HOME=<資料夾>`、`--env CODEX_ELECTRON_USER_DATA_PATH=<資料夾>/app-data`；新版只認這個環境變數，沒設的話第二個程序會被單一實例鎖直接結束。
   - Claude 正式版會刪掉 `CLAUDE_USER_DATA_DIR`，不再傳。
   - 實例資料夾名稱取 UUID 前 8 碼：VS Code 在資料夾內建立 IPC socket，完整 UUID 會超過 macOS 104 字元的 socket 路徑上限而啟動即結束。舊實例沿用已存的路徑。
   - `open` 會把呼叫端的環境變數轉交給 App，啟動時濾掉 `DYLD_*`。
-- 執行狀態以 `ps` 比對：主執行檔位於 `<App 名稱>.app/Contents/MacOS/`（只比對 App 名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行），預設實例是沒有 `--user-data-dir` 的那個，其他以資料夾比對（等號與空格兩種寫法都認）；停止送 SIGTERM。
+- 執行狀態以 `ps` 比對主執行檔：`.app/Contents/MacOS/` 之前的路徑不能再有 `/Contents/`（排除 Frameworks 裡的 Helper）也不能有引號（排除 VS Code 讀 shell 環境的 `/bin/zsh -c '…/Code'`）。預設實例是原本 App 名稱（只比對名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行）、沒有 `--user-data-dir`、不在複本資料夾的那個；其他實例不看 App 名稱（複本檔名會變），只比對資料夾（等號與空格兩種寫法都認）。停止送 SIGTERM。
 - 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 與 VS Code 的登入存在各自加密的儲存區，不提供綁定，實例內自行登入一次。
 - Claude 實例（含預設）改為**自動辨識**目前登入的帳號，列上只顯示、不提供選單：讀該實例資料夾 `config.json` 的 `lastKnownAccountUuid`，同時要有非空的 `oauth:tokenCache*` 才算登入中（`lastKnown` 登出後可能殘留，這一點未實測登出行為），再對到 `Account.accountUUID`（Claude `api/oauth/profile` 的 `account.uuid`，帳號沒有時每輪補抓）。2026-10-08 實測兩者同一套編號：`~/.claude.json` 的 `oauthAccount.accountUuid` 與預設 Claude 相同，兩個實例都對到正確帳號。不能做成像 Codex 的選單：AspaceI 手上是 Claude Code 的 OAuth token，桌面 App 的登入是 claude.ai cookie 與 safeStorage 加密的 token 快取，寫不進去。登入狀態在打開實例分頁與按更新時重讀。
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。
@@ -130,26 +130,26 @@ Claude（Squirrel／ShipIt）、VS Code（Squirrel）、Codex（Sparkle）的更
 - 等到使用者把全部關掉，ShipIt 才安裝，`launchAfterInstallation` 為真時只會開 `/Applications/Claude.app`（不帶參數 = 預設實例）。
 - Codex 的 Sparkle `Autoupdate` 也是同樣情形（當天 16:22 起一直在等）。
 
-AspaceI 無法阻止 App 自己結束，只能讓更新真的裝上：`refreshRunning` 以 `ps` 找 `<App>.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt` 或 `Sparkle.framework/…/Autoupdate`，有的話該組標題顯示「更新並重開」。確認後一次對該 App 所有實例送 SIGTERM、等主程序結束（10 秒）、等更新程式結束（60 秒），再把原本開著的實例開回來；更新逾時也照樣開回來。App 自己先結束的那個實例不在清單裡，要手動開。
+非預設實例改用各自的複本後，原本 App 只剩預設實例會擋住它的更新程式，問題自然消失（Squirrel 只等同一路徑的程序）。過渡期仍可能有從原本 App 開的非預設實例：`refreshRunning` 以 `ps` 找原本 App 的 `Squirrel.framework/Resources/ShipIt` 或 `Sparkle.framework/…/Autoupdate`，**而且**有非預設實例直接從原本 App 執行時，該組標題顯示「更新並重開」。確認後只關從原本 App 執行的實例、等主程序結束（10 秒）、等更新程式結束（60 秒），再開回來（非預設實例就此改用複本）；更新逾時也照樣開回來。App 自己先結束的那個實例不在清單裡，要手動開。Sparkle 是否也只等同一路徑未驗證。
 
 ### 非預設實例的 App 名稱與圖示
 
-Dock／⌘Tab 顯示的是程序所屬 bundle 的名稱與圖示，執行中無法從外部改（2026-10-09 實測）：
+Dock 顯示的是程序所屬 bundle 的圖示，執行中無法從外部改（2026-10-09 實測）：`_LSSetApplicationInformationItem` 對別的程序設顯示名稱回傳 0 但不生效；Claude 的 Electron fuses 關掉了 `RunAsNode`、`NODE_OPTIONS`、`--inspect` 且啟用 asar 完整性檢查，無法注入；Dock 標記只在 App 內部設定；`disableAutoUpdates` 是依 bundle id 套用到所有 Claude 的企業政策。
 
-- `_LSSetApplicationInformationItem` 對別的程序設 `_kLSDisplayNameKey` 回傳 0 但不生效。
-- Claude 的 Electron fuses 關掉了 `RunAsNode`、`NODE_OPTIONS`、`--inspect`，且啟用 asar 完整性檢查，無法注入呼叫 `app.dock.setIcon`。
-- Claude 的 Dock 標記（`app.dock.setBadge`）只在沒有待處理數字時顯示內部的 `devLabel`，外部設定不到。
-- `disableAutoUpdates` 是企業管理政策，依 bundle id 套用到所有 Claude（含預設實例）。
+因此每個非預設實例啟動前由 `AppCloneService` 準備一份**複本**，四個平台都一樣：
 
-**可行做法：每個實例一份 APFS 複本＋Finder 自訂圖示，不動 `Contents`、不重簽。**
-
-- `cp -c -R` 不到 1 秒、幾乎不佔空間；`NSWorkspace.setIcon` 只在 bundle 根目錄加 `Icon\r`，`codesign --verify` 與 Anthropic 的 designated requirement 都通過（`--strict` 會因 `Icon\r` 失敗）。
-- 以 `open -n -a <複本> --args --user-data-dir=…` 啟動：正常執行、Dock 顯示自訂圖示、沒有跳鑰匙圈詢問、Cookies 加密正常。bundle id 與簽章相同，TCC 權限沿用。
-- 名稱改不了：`NSRunningApplication.localizedName` 仍是 `Claude`（來自 `CFBundleName`），Finder／Spotlight 才顯示複本檔名。要改 Dock 名稱就得改 Info.plist，簽章即失效，回到重簽的代價（`keychain-access-groups` 等受限權限、library validation、TCC）。
+- 位置：`Application Support/AspaceI/Apps.noindex/<實例 id 前 8 碼小寫>/<App 名稱> - <使用者名稱>.app`。`.noindex` 讓 Spotlight 不收錄——從 Spotlight 直接打開複本會開到預設資料夾。
+- `clonefile` 整包複製（APFS，不到 1 秒、幾乎不佔空間），不動 `Contents`、不重簽；簽章與 bundle id 不變，`codesign --verify` 與原 designated requirement 都通過，Keychain 不再詢問、TCC 權限沿用。只在 bundle 根目錄以 `NSWorkspace.setIcon` 寫 `Icon\r`（`--strict` 會因此失敗，一般驗證不受影響）。
+- 圖示：原本 App 的圖示右下角疊深色膠囊與使用者名稱前兩個字母或數字（`InstanceIconRenderer`）。使用者名稱：Claude 取實例 `config.json` 辨識到的帳號，Codex 取綁定的帳號，其他或不知道時用實例名稱。每次啟動都重畫，帳號變了下次啟動就會更新。
+- 原本 App 帶 `com.apple.quarantine` 時（實測 VS Code 有）複本會移除它：原版已經過使用者確認，複本換了位置會被再問一次或改從暫存路徑執行。
+- 版本：複本比原本 App 舊就刪掉重做；複本自己更新過（ShipIt 可能把檔名改回 `Claude.app`）而比原版新就沿用、改回實例名稱。版本直接讀 Info.plist，`Bundle(url:)` 依路徑快取會回舊值。
+- **Dock 名稱改不了**：滑鼠移到圖示上仍是 `Claude`（`CFBundleName`），要改就得改 Info.plist、簽章失效，回到重簽的代價（`keychain-access-groups` 等受限權限、library validation、TCC）。檔名只在 Finder 看得到。
 - `claude://` 的預設處理者仍是 `/Applications/Claude.app`，複本只是候選。
-- 更新：Squirrel 的 `SQRLTerminationListener` 以 bundle id 篩選後再比對 bundle URL，所以每份複本只等自己的程序，不會再互相卡住。但 `ShipItState.plist` 在 `~/Library/Caches/com.anthropic.claudefordesktop.ShipIt/`，同 bundle id 共用：實測複本開著一分鐘就下載更新並把狀態改成指向自己，原版排好的安裝被蓋掉（原版下次檢查更新會重新排）。ShipIt 的重開不帶參數，複本更新後重開的會是預設資料夾。帶 `Icon\r` 的複本能否被 ShipIt 成功更新未驗證（測試時複本已刪，安裝報 -67068）。
+- 複本更新：ShipIt 安裝完重開時不帶參數，開到預設資料夾。`InstanceManager.startMonitoring` 監看 `didLaunchApplicationNotification`，在複本資料夾內、命令列沒有 `--user-data-dir` 的程序一律關掉，改以實例資料夾重開（順便把檔名與圖示改回來）。AspaceI 沒在執行時這段不會發生。
+- `ShipItState.plist` 在 `~/Library/Caches/com.anthropic.claudefordesktop.ShipIt/`，同 bundle id 共用：複本下載更新時會把狀態改成指向自己，蓋掉原本 App 排好的安裝；原本 App 下次檢查更新（約 20 分鐘到 1 小時）會重新排。帶 `Icon\r` 的複本能否被 ShipIt 成功更新未驗證；失敗也無妨，AspaceI 會在原本 App 更新後重新複製。
+- 刪除實例時一併刪除複本資料夾（可重建的衍生資料，不進垃圾桶）。
 
-尚未實作，待決定。
+2026-10-09 實測：以正式程式碼建立 Claude 與 VS Code 複本，用測試資料夾開啟後 Dock 顯示帶字樣的圖示，簽章驗證通過、沒有跳鑰匙圈詢問。
 
 刪除 Instance 時先送 SIGTERM 並等主程序結束（最多 10 秒，逾時則不刪），否則還在跑的 App 會把資料夾寫回來。只允許處理 `Application Support/AspaceI/Instances/` 的直接子目錄，並移至垃圾桶以保留復原能力；外部路徑一律拒絕。
 
