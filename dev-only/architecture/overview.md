@@ -134,10 +134,22 @@ AspaceI 無法阻止 App 自己結束，只能讓更新真的裝上：`refreshRu
 
 ### 非預設實例的 App 名稱與圖示
 
-Dock／⌘Tab 顯示的是程序所屬 bundle 的名稱與圖示，外部無法改：
+Dock／⌘Tab 顯示的是程序所屬 bundle 的名稱與圖示，執行中無法從外部改（2026-10-09 實測）：
 
-- `_LSSetApplicationInformationItem` 對別的程序設 `_kLSDisplayNameKey` 回傳 0 但不生效（2026-10-09 實測）。
-- 唯一做法是複製 App（APFS clone）、改 Info.plist 與圖示、重新簽章。Claude 主程式帶 `keychain-access-groups` 與 `com.apple.application-identifier`（Anthropic 團隊的受限權限），用別的身分簽就必須拿掉，passkey／硬體金鑰／Microsoft 登入會失效；另外 hardened runtime 的 library validation 要求整包同一團隊簽章、改 bundle id 後 TCC 權限要重新授權、`Claude Safe Storage` Keychain 會再詢問、複本不會自動更新。尚未實作，待決定。
+- `_LSSetApplicationInformationItem` 對別的程序設 `_kLSDisplayNameKey` 回傳 0 但不生效。
+- Claude 的 Electron fuses 關掉了 `RunAsNode`、`NODE_OPTIONS`、`--inspect`，且啟用 asar 完整性檢查，無法注入呼叫 `app.dock.setIcon`。
+- Claude 的 Dock 標記（`app.dock.setBadge`）只在沒有待處理數字時顯示內部的 `devLabel`，外部設定不到。
+- `disableAutoUpdates` 是企業管理政策，依 bundle id 套用到所有 Claude（含預設實例）。
+
+**可行做法：每個實例一份 APFS 複本＋Finder 自訂圖示，不動 `Contents`、不重簽。**
+
+- `cp -c -R` 不到 1 秒、幾乎不佔空間；`NSWorkspace.setIcon` 只在 bundle 根目錄加 `Icon\r`，`codesign --verify` 與 Anthropic 的 designated requirement 都通過（`--strict` 會因 `Icon\r` 失敗）。
+- 以 `open -n -a <複本> --args --user-data-dir=…` 啟動：正常執行、Dock 顯示自訂圖示、沒有跳鑰匙圈詢問、Cookies 加密正常。bundle id 與簽章相同，TCC 權限沿用。
+- 名稱改不了：`NSRunningApplication.localizedName` 仍是 `Claude`（來自 `CFBundleName`），Finder／Spotlight 才顯示複本檔名。要改 Dock 名稱就得改 Info.plist，簽章即失效，回到重簽的代價（`keychain-access-groups` 等受限權限、library validation、TCC）。
+- `claude://` 的預設處理者仍是 `/Applications/Claude.app`，複本只是候選。
+- 更新：Squirrel 的 `SQRLTerminationListener` 以 bundle id 篩選後再比對 bundle URL，所以每份複本只等自己的程序，不會再互相卡住。但 `ShipItState.plist` 在 `~/Library/Caches/com.anthropic.claudefordesktop.ShipIt/`，同 bundle id 共用：實測複本開著一分鐘就下載更新並把狀態改成指向自己，原版排好的安裝被蓋掉（原版下次檢查更新會重新排）。ShipIt 的重開不帶參數，複本更新後重開的會是預設資料夾。帶 `Icon\r` 的複本能否被 ShipIt 成功更新未驗證（測試時複本已刪，安裝報 -67068）。
+
+尚未實作，待決定。
 
 刪除 Instance 時先送 SIGTERM 並等主程序結束（最多 10 秒，逾時則不刪），否則還在跑的 App 會把資料夾寫回來。只允許處理 `Application Support/AspaceI/Instances/` 的直接子目錄，並移至垃圾桶以保留復原能力；外部路徑一律拒絕。
 
