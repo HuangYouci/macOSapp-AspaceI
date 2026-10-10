@@ -317,7 +317,11 @@ final class InstanceManager {
                 if await processList()[pid] == nil { break }
             }
         }
-        guard InstanceService.mainProcessIDs(for: instance, isDefault: false, in: await processList()).isEmpty else { return }
+        // 實例已經在跑（例如從 Dock 點了複本）就把它叫到前面，否則看起來像是點了打不開。
+        if let running = InstanceService.mainProcessIDs(for: instance, isDefault: false, in: await processList()).first {
+            NSRunningApplication(processIdentifier: running)?.activate()
+            return
+        }
         launch(instance, accounts: accounts)
     }
 

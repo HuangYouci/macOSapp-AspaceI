@@ -13,38 +13,91 @@ final class AppCloneService: Sendable {
 
     /// 準備好這次要啟動的複本並回傳路徑；只在實例沒有執行時呼叫。
     /// `source` 是同平台版本最新的那份（原本的 App 或別的實例的複本），`original` 是原本的 App，圖示以它為底。
+    ///
+    /// 開過的 App 受 macOS「App 管理」保護：AspaceI 沒有該權限，改不了裡面任何東西（圖示也寫不進去），
+    /// 但整包改名、刪除不受限。所以圖示只畫在剛複製、還沒開過的複本上；之後圖示要換、
+    /// 或被更新程式整包換掉而不見時，從最新那份重新複製一份，不動舊的內容。
     @MainActor
     func prepare(source: URL, original: URL, instance: Instance, title: String, badge: String) throws -> URL {
         let directory = try directory(for: instance.id)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let target = directory.appending(path: "\(Self.sanitizedFileName(title)).app", directoryHint: .isDirectory)
-        let existing = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "app" }
-        let keep = Self.reusableClone(
-            existing.map { ($0, Self.bundleVersion(of: $0)) },
-            sourceVersion: Self.bundleVersion(of: source)
+        let existing = try bundles(in: directory)
+        let badgeFile = directory.appending(path: Self.badgeFileName)
+        let plan = Self.plan(
+            existing: existing.map { ($0, Self.bundleVersion(of: $0), Self.hasCustomIcon($0)) },
+            source: source,
+            sourceVersion: Self.bundleVersion(of: source),
+            storedBadge: FileManager.default.fileExists(atPath: badgeFile.path) ? try String(contentsOf: badgeFile, encoding: .utf8) : nil,
+            badge: badge
         )
-        for bundle in existing where bundle.standardizedFileURL != keep?.standardizedFileURL {
-            try FileManager.default.removeItem(at: bundle)
-        }
-        if let keep {
+        switch plan {
+        case .reuse(let keep):
+            for bundle in existing where bundle.standardizedFileURL != keep.standardizedFileURL {
+                try FileManager.default.removeItem(at: bundle)
+            }
             if keep.standardizedFileURL != target.standardizedFileURL {
                 try FileManager.default.moveItem(at: keep, to: target)
             }
-        } else {
-            try Self.clone(source, to: target)
+        case .reclone(let from):
+            let staging = directory.appending(path: Self.stagingName, directoryHint: .isDirectory)
+            if FileManager.default.fileExists(atPath: staging.path) {
+                try FileManager.default.removeItem(at: staging)
+            }
+            try Self.clone(from, to: staging)
+            let icon = InstanceIconRenderer.icon(base: NSWorkspace.shared.icon(forFile: original.path), badge: badge)
+            guard NSWorkspace.shared.setIcon(icon, forFile: staging.path, options: []) else { throw AppCloneError.iconFailed }
+            for bundle in existing {
+                try FileManager.default.removeItem(at: bundle)
+            }
+            try FileManager.default.moveItem(at: staging, to: target)
+            try badge.write(to: badgeFile, atomically: true, encoding: .utf8)
         }
-        let icon = InstanceIconRenderer.icon(base: NSWorkspace.shared.icon(forFile: original.path), badge: badge)
-        guard NSWorkspace.shared.setIcon(icon, forFile: target.path, options: []) else { throw AppCloneError.iconFailed }
         return target
+    }
+
+    enum PreparePlan: Equatable {
+        /// 沿用這份，只改檔名。
+        case reuse(URL)
+        /// 從這份重新複製並畫圖示。
+        case reclone(from: URL)
+    }
+
+    /// 版本最新、而且圖示還在、圖示上的字也對的複本才沿用；否則從版本最新的那份（可能就是它）重新複製。
+    static func plan(
+        existing: [(url: URL, version: String?, hasCustomIcon: Bool)],
+        source: URL,
+        sourceVersion: String?,
+        storedBadge: String?,
+        badge: String
+    ) -> PreparePlan {
+        guard let keep = reusableClone(existing.map { ($0.url, $0.version) }, sourceVersion: sourceVersion) else {
+            return .reclone(from: source)
+        }
+        let hasIcon = existing.first { $0.url.standardizedFileURL == keep.standardizedFileURL }?.hasCustomIcon ?? false
+        return hasIcon && storedBadge == badge ? .reuse(keep) : .reclone(from: keep)
     }
 
     /// 該實例資料夾內的所有 App（正常只有一份；複本自己更新後可能多一份改回原名的）。
     func bundles(for id: UUID) throws -> [URL] {
         let directory = try directory(for: id)
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "app" }
+        return try bundles(in: directory)
+    }
+
+    /// 不含複製到一半的暫存複本。
+    private func bundles(in directory: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "app" && $0.lastPathComponent != Self.stagingName }
+    }
+
+    private static let stagingName = ".staging.app"
+    /// 目前複本圖示上畫的字。存在 bundle 外面：開過的複本裡面寫不進去。
+    private static let badgeFileName = "badge"
+
+    /// Finder 自訂圖示存在 bundle 根目錄的 `Icon\r`；更新程式整包換掉後就不見了。
+    static func hasCustomIcon(_ bundle: URL) -> Bool {
+        FileManager.default.fileExists(atPath: bundle.appending(path: "Icon\r").path)
     }
 
     /// 版本最新的那份；同版本時取排在前面的（呼叫端把原本的 App 放第一個）。
