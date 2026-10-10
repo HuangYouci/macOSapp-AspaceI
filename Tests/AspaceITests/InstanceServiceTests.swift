@@ -101,6 +101,33 @@ struct InstanceServiceTests {
         #expect(InstanceService.parseClaudeSignedInAccountUUID(Data("壞掉".utf8)) == nil)
     }
 
+    @Test("關閉 Claude menu bar 圖示：只改 menuBarEnabled，其他欄位原樣保留")
+    func disablesClaudeMenuBar() throws {
+        func root(_ data: Data?) throws -> [String: Any] {
+            try JSONSerialization.jsonObject(with: data!) as! [String: Any]
+        }
+        func preferences(_ data: Data?) throws -> [String: Any] {
+            try root(data)["preferences"] as! [String: Any]
+        }
+        let existing = Data(#"{"coworkUserFilesPath":"/Users/a/Claude","preferences":{"sidebarMode":"epitaxy","launchPreviewPersistedWorkspaces":["cowork-shared"]}}"#.utf8)
+        let updated = try InstanceService.disablingClaudeMenuBar(in: existing)
+        #expect(try root(updated)["coworkUserFilesPath"] as? String == "/Users/a/Claude")
+        #expect(try preferences(updated)["menuBarEnabled"] as? Bool == false)
+        #expect(try preferences(updated)["sidebarMode"] as? String == "epitaxy")
+        #expect(try preferences(updated)["launchPreviewPersistedWorkspaces"] as? [String] == ["cowork-shared"])
+        // 斜線不轉義，維持 Claude 自己寫的樣子。
+        #expect(String(decoding: updated!, as: UTF8.self).contains("/Users/a/Claude"))
+        // 使用者在 Claude 裡打開過也會被關回去。
+        #expect(try preferences(InstanceService.disablingClaudeMenuBar(in: Data(#"{"preferences":{"menuBarEnabled":true}}"#.utf8)))["menuBarEnabled"] as? Bool == false)
+        // 新實例還沒有設定檔。
+        #expect(try preferences(InstanceService.disablingClaudeMenuBar(in: nil))["menuBarEnabled"] as? Bool == false)
+        // 已經關了就不寫檔。
+        #expect(try InstanceService.disablingClaudeMenuBar(in: Data(#"{"preferences":{"menuBarEnabled":false}}"#.utf8)) == nil)
+        // 格式不對不覆寫。
+        #expect(throws: InstanceError.self) { try InstanceService.disablingClaudeMenuBar(in: Data("壞掉".utf8)) }
+        #expect(throws: InstanceError.self) { try InstanceService.disablingClaudeMenuBar(in: Data(#"{"preferences":[]}"#.utf8)) }
+    }
+
     @Test("Claude profile 的帳號編號統一成小寫")
     func parsesClaudeProfileAccountUUID() {
         #expect(QuotaService.parseClaudeAccountUUID(["account": ["uuid": "A1579349-DF6C-4B51-B782-A15C70F8C35B"]]) == "a1579349-df6c-4b51-b782-a15c70f8c35b")

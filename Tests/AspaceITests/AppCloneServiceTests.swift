@@ -17,6 +17,22 @@ struct AppCloneServiceTests {
         #expect(AppCloneService.reusableClone([], sourceVersion: "1.0") == nil)
     }
 
+    @Test("開過的複本改不了內容：圖示不見或字不對就從最新那份重新複製，不在原地重畫")
+    func plansRecloneInsteadOfRepaint() {
+        let source = URL(fileURLWithPath: "/Applications/Claude.app")
+        // 圖示在、字也對：沿用。
+        #expect(AppCloneService.plan(existing: [(old, "2.31226.1", true)], source: source, sourceVersion: "2.31226.1", storedBadge: "sup", badge: "sup") == .reuse(old))
+        // 更新程式整包換掉，圖示不見了：從它自己重新複製，保留它較新的版本。
+        #expect(AppCloneService.plan(existing: [(old, "2.31226.1", false)], source: source, sourceVersion: "2.31226.0", storedBadge: "sup", badge: "sup") == .reclone(from: old))
+        // 帳號換了，圖示上的字要換。
+        #expect(AppCloneService.plan(existing: [(old, "2.31226.1", true)], source: source, sourceVersion: "2.31226.1", storedBadge: "sup", badge: "cla") == .reclone(from: old))
+        // 舊版程式做的複本沒有記錄字：重做一次。
+        #expect(AppCloneService.plan(existing: [(old, "2.31226.1", true)], source: source, sourceVersion: "2.31226.1", storedBadge: nil, badge: "sup") == .reclone(from: old))
+        // 比來源舊：從來源重新複製。
+        #expect(AppCloneService.plan(existing: [(old, "2.26454.2", true)], source: source, sourceVersion: "2.31226.1", storedBadge: "sup", badge: "sup") == .reclone(from: source))
+        #expect(AppCloneService.plan(existing: [], source: source, sourceVersion: "2.31226.1", storedBadge: nil, badge: "sup") == .reclone(from: source))
+    }
+
     @Test("從路徑找出實例資料夾，只認 AspaceI 的複本根目錄")
     func findsInstanceFolder() {
         #expect(AppCloneService.instanceFolder(inPath: "/u/Library/Application Support/AspaceI/Apps.noindex/1cbfe5af/Claude.app") == "1cbfe5af")

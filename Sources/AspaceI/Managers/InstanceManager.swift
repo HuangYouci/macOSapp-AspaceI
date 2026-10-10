@@ -213,8 +213,16 @@ final class InstanceManager {
                     cloneError = error
                 }
             }
+            var menuBarError: Error?
+            do {
+                // 每個 Claude 實例都會在 menu bar 放一個自己的圖示，多開時擠滿 menu bar。
+                try service.disableClaudeMenuBar(for: instance, isDefault: isDefault)
+            } catch {
+                logger.error("InstanceManager.launch | 關閉 \(instance.name, privacy: .public) 的 menu bar 圖示失敗：\(error.localizedDescription, privacy: .public)")
+                menuBarError = error
+            }
             try service.launch(instance, appPath: appPath, isDefault: isDefault)
-            errorMessage = cloneError?.localizedDescription
+            errorMessage = (cloneError ?? menuBarError)?.localizedDescription
             scheduleRunningRefresh()
         } catch {
             errorMessage = error.localizedDescription
@@ -317,7 +325,11 @@ final class InstanceManager {
                 if await processList()[pid] == nil { break }
             }
         }
-        guard InstanceService.mainProcessIDs(for: instance, isDefault: false, in: await processList()).isEmpty else { return }
+        // 實例已經在跑（例如從 Dock 點了複本）就把它叫到前面，否則看起來像是點了打不開。
+        if let running = InstanceService.mainProcessIDs(for: instance, isDefault: false, in: await processList()).first {
+            NSRunningApplication(processIdentifier: running)?.activate()
+            return
+        }
         launch(instance, accounts: accounts)
     }
 
