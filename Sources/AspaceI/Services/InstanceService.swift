@@ -149,16 +149,47 @@ final class InstanceService: Sendable {
     /// Claude 桌面 App 實例目前登入的帳號編號；沒登入、讀不到或格式不對都回 nil。
     /// 預設實例讀官方 App 自己的資料夾。只讀 `config.json`，不碰加密的登入資料。
     func claudeSignedInAccountUUID(for instance: Instance, isDefault: Bool) -> String? {
-        guard instance.platform == .claude else { return nil }
-        let directory: URL
-        if isDefault {
-            guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-            directory = support.appending(path: "Claude", directoryHint: .isDirectory)
-        } else {
-            directory = URL(fileURLWithPath: instance.profileDirectory)
-        }
-        guard let data = try? Data(contentsOf: directory.appending(path: "config.json")) else { return nil }
+        guard instance.platform == .claude, let directory = claudeDataDirectory(for: instance, isDefault: isDefault),
+              let data = try? Data(contentsOf: directory.appending(path: "config.json")) else { return nil }
         return Self.parseClaudeSignedInAccountUUID(data)
+    }
+
+    /// 關掉 Claude 自己的 menu bar 圖示（與它設定頁的開關是同一個值）。只在實例沒有執行時呼叫：
+    /// Claude 啟動時把設定讀進記憶體，之後以記憶體的版本整份寫回，執行中改檔案會被蓋掉。
+    func disableClaudeMenuBar(for instance: Instance, isDefault: Bool) throws {
+        guard instance.platform == .claude, let directory = claudeDataDirectory(for: instance, isDefault: isDefault) else { return }
+        let url = directory.appending(path: "claude_desktop_config.json")
+        let existing = FileManager.default.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil
+        guard let updated = try Self.disablingClaudeMenuBar(in: existing) else { return }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try updated.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// 回傳 `preferences.menuBarEnabled` 設為 false 後的內容；已經是 false 時回傳 nil，不必寫檔。
+    /// 其他欄位原樣保留；格式不對就拋錯，不覆寫使用者的檔案。
+    static func disablingClaudeMenuBar(in data: Data?) throws -> Data? {
+        var root: [String: Any] = [:]
+        if let data {
+            guard let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw InstanceError.invalidClaudeConfig }
+            root = parsed
+        }
+        var preferences: [String: Any] = [:]
+        if let value = root["preferences"] {
+            guard let parsed = value as? [String: Any] else { throw InstanceError.invalidClaudeConfig }
+            preferences = parsed
+        }
+        if let enabled = preferences["menuBarEnabled"] as? Bool, !enabled { return nil }
+        preferences["menuBarEnabled"] = false
+        root["preferences"] = preferences
+        return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .withoutEscapingSlashes])
+    }
+
+    /// 預設實例是官方 App 自己的資料夾。
+    private func claudeDataDirectory(for instance: Instance, isDefault: Bool) -> URL? {
+        guard isDefault else { return URL(fileURLWithPath: instance.profileDirectory) }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appending(path: "Claude", directoryHint: .isDirectory)
     }
 
     /// `lastKnownAccountUuid` 登出後可能還留著，所以另外要求登入 token 快取存在才算登入中。
@@ -209,9 +240,10 @@ final class InstanceService: Sendable {
 }
 
 enum InstanceError: LocalizedError {
-    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut, removeQuitTimedOut, updateQuitTimedOut, updateTimedOut
+    case executableMissing, unsafeProfilePath, launchFailed, quitTimedOut, removeQuitTimedOut, updateQuitTimedOut, updateTimedOut, invalidClaudeConfig
     var errorDescription: String? {
         switch self {
+        case .invalidClaudeConfig: "claude_desktop_config.json 格式不對，未關閉 menu bar 圖示"
         case .executableMissing: "找不到 App"
         case .unsafeProfilePath: "拒絕刪除不在 AspaceI 管理範圍內的資料夾"
         case .launchFailed: "App 啟動失敗"

@@ -2,7 +2,7 @@
 
 最後更新日期：2026-10-10
 
-對應功能／commit：複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -121,6 +121,7 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 - 執行狀態以 `ps` 比對主執行檔：`.app/Contents/MacOS/` 之前的路徑不能再有 `/Contents/`（排除 Frameworks 裡的 Helper）也不能有引號（排除 VS Code 讀 shell 環境的 `/bin/zsh -c '…/Code'`）。預設實例是原本 App 名稱（只比對名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行）、沒有 `--user-data-dir`、不在複本資料夾的那個；其他實例不看 App 名稱（複本檔名會變），只比對資料夾（等號與空格兩種寫法都認）。停止送 SIGTERM。
 - 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 與 VS Code 的登入存在各自加密的儲存區，不提供綁定，實例內自行登入一次。
 - Claude 實例（含預設）改為**自動辨識**目前登入的帳號，列上只顯示、不提供選單：讀該實例資料夾 `config.json` 的 `lastKnownAccountUuid`，同時要有非空的 `oauth:tokenCache*` 才算登入中（`lastKnown` 登出後可能殘留，這一點未實測登出行為），再對到 `Account.accountUUID`（Claude `api/oauth/profile` 的 `account.uuid`，帳號沒有時每輪補抓）。2026-10-08 實測兩者同一套編號：`~/.claude.json` 的 `oauthAccount.accountUuid` 與預設 Claude 相同，兩個實例都對到正確帳號。不能做成像 Codex 的選單：AspaceI 手上是 Claude Code 的 OAuth token，桌面 App 的登入是 claude.ai cookie 與 safeStorage 加密的 token 快取，寫不進去。登入狀態在打開實例分頁與按更新時重讀。
+- Claude 實例（含預設）不放自己的 menu bar 圖示：每個實例各放一個，多開時擠滿 menu bar。啟動前把該實例 `claude_desktop_config.json` 的 `preferences.menuBarEnabled` 設為 false（Claude 設定頁的同一個開關，關掉時 App 不建立 `Tray`），其他欄位原樣保留，格式不對就不寫、照常啟動。只能在實例沒執行時寫：Claude 啟動時把設定讀進記憶體，之後以記憶體的版本整份寫回，執行中改檔案會被蓋掉。所以已在執行的實例要經 AspaceI 重開一次才生效；預設實例被 ShipIt 或 Dock 直接打開時沿用檔案裡已寫入的值。2026-10-10 實測：AspaceI 開啟的測試實例沒有 status item，Claude 啟動與結束寫回後值仍為 false。
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。
 
 ### 多開與 App 自動更新
