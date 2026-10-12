@@ -2,7 +2,7 @@
 
 最後更新日期：2026-10-12
 
-對應功能／commit：popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -60,7 +60,7 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 
 - App 採 accessory activation policy，不顯示 Dock 圖示。
 - App 只有 menu bar popup，不建立一般主視窗或漂浮視窗。
-- Popup 分為額度、實例、設定三個分頁；帳號管理併入額度分頁，以單列卡片呈現並由列尾選單切換帳號。
+- Popup 分為額度、用量、實例、設定四個分頁（用量的資料流與規則見 `dev-only/usage-stats/overview.md`）；帳號管理併入額度分頁，以單列卡片呈現並由列尾選單切換帳號。
 - Popup 固定 456 × 640，每一頁各自一個捲動區（切頁從頂端開始）。捲動區貼齊 popup 四邊，14pt 留白放在捲動內容裡，邊緣也捲得到；分頁列與錯誤訊息以 `popupBar`（`safeAreaBar`）固定在上下緣，內容捲進列底下時由系統柔和邊緣模糊淡出。2026-10-12 實測：SwiftUI `Material` 與 `NSVisualEffectView(.withinWindow)` 都模糊不到捲動內容，只會疊一層白，所以不自己畫；macOS 26 以前沒有柔和邊緣，退回捲動區接在列的邊界。曾嘗試高度隨內容並錨定左上角，但 MenuBarExtra 視窗縮放時仍會跳動，因此改為固定尺寸（2026-09-13 決策）。加入帳號與新增實例在 popup 內切換畫面，不使用 sheet。
 - 字級：macOS 不支援 Dynamic Type，popup 內一律使用 `Font.scaled(_:)`，以系統文字樣式基準放大 1.2 倍；根視圖設定 `.scaled(.body)` 讓控制項文字一併放大。
 - MenuBarExtra 視窗不吃 `preferredColorScheme`，以 `PopupWindowConfigurator` 直接設定 NSWindow 為 aqua。

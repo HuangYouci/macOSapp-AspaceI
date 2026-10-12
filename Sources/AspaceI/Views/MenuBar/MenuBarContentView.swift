@@ -4,9 +4,12 @@ struct MenuBarContentView: View {
     @Environment(AccountManager.self) private var accountManager
     @Environment(InstanceManager.self) private var instanceManager
     @Environment(AccountLoginManager.self) private var loginManager
+    @Environment(UsageManager.self) private var usageManager
     @State private var selection = Section.quota
     @State private var editor: Editor?
     @State private var confirmation: ConfirmationRequest?
+    @State private var usageRange = UsageRange.week
+    @State private var usageFilter: UsageOwnerKey?
 
     /// popup 四周的留白。留白放在捲動區裡面，捲動區本身貼齊 popup 四邊，邊緣也捲得到。
     private static let inset: CGFloat = 14
@@ -70,6 +73,8 @@ struct MenuBarContentView: View {
             switch selection {
             case .quota:
                 scrollPage { quotaView }
+            case .usage:
+                scrollPage { usageView }
             case .instances:
                 scrollPage { InstanceListView(onAdd: { editor = .instance($0) }, confirm: { confirmation = $0 }) }
             case .settings:
@@ -89,6 +94,7 @@ struct MenuBarContentView: View {
         HStack(spacing: 6) {
             HStack(spacing: 2) {
                 tabButton(.quota)
+                tabButton(.usage)
                 tabButton(.instances)
                 tabButton(.settings)
             }
@@ -117,6 +123,14 @@ struct MenuBarContentView: View {
             Button("加入帳號", systemImage: "plus") { editor = .account }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
+        case .usage:
+            Button("更新", systemImage: "arrow.clockwise") {
+                Task { await usageManager.refresh(accounts: accountManager, instances: instanceManager) }
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .symbolEffect(.rotate, options: .repeating, isActive: usageManager.isScanning)
+            .disabled(usageManager.isScanning)
         case .instances:
             Button("更新", systemImage: "arrow.clockwise") {
                 Task { await instanceManager.refreshRunning() }
@@ -128,6 +142,22 @@ struct MenuBarContentView: View {
         case .settings:
             EmptyView()
         }
+    }
+
+    private var usageView: some View {
+        UsageView(
+            summary: usageManager.hasScanned ? UsageSummary(
+                records: usageManager.records,
+                range: usageRange,
+                filter: usageFilter,
+                accounts: accountManager.accounts,
+                today: Date(),
+                calendar: .current
+            ) : nil,
+            range: $usageRange,
+            filter: $usageFilter,
+            filterTitle: usageFilter.map { UsageSummary.title(for: $0, accounts: accountManager.accounts) }
+        )
     }
 
     @ViewBuilder
@@ -198,12 +228,14 @@ struct MenuBarContentView: View {
 extension MenuBarContentView {
     enum Section: Hashable {
         case quota
+        case usage
         case instances
         case settings
 
         var title: String {
             switch self {
             case .quota: "額度"
+            case .usage: "用量"
             case .instances: "實例"
             case .settings: "設定"
             }
@@ -212,6 +244,7 @@ extension MenuBarContentView {
         var symbolName: String {
             switch self {
             case .quota: "gauge.with.dots.needle.50percent"
+            case .usage: "chart.bar"
             case .instances: "square.stack.3d.up"
             case .settings: "gearshape"
             }
