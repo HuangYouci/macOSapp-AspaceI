@@ -41,13 +41,13 @@ struct AspaceIApp: App {
                 mode: settingsManager.menuBarQuotaMode
             ))
                 .onChange(of: accountManager.accounts.map(\.label)) {
-                    instanceManager.refreshCloneIcons(accounts: accountManager)
+                    Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .onChange(of: instanceManager.instances) {
-                    instanceManager.refreshCloneIcons(accounts: accountManager)
+                    Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .onChange(of: instanceManager.signedInAccountUUIDs) {
-                    instanceManager.refreshCloneIcons(accounts: accountManager)
+                    Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .task {
                     instanceManager.startMonitoring(accounts: accountManager)

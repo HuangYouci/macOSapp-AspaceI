@@ -2,7 +2,7 @@
 
 最後更新日期：2026-10-12
 
-對應功能／commit：menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -61,7 +61,7 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 - App 採 accessory activation policy，不顯示 Dock 圖示。
 - App 只有 menu bar popup，不建立一般主視窗或漂浮視窗。
 - Popup 分為額度、實例、設定三個分頁；帳號管理併入額度分頁，以單列卡片呈現並由列尾選單切換帳號。
-- Popup 固定 456 × 640，各分頁內容自行捲動。曾嘗試高度隨內容並錨定左上角，但 MenuBarExtra 視窗縮放時仍會跳動，因此改為固定尺寸（2026-09-13 決策）。加入帳號與新增實例在 popup 內切換畫面，不使用 sheet。
+- Popup 固定 456 × 640，每一頁各自一個捲動區（切頁從頂端開始）。捲動區貼齊 popup 四邊，14pt 留白放在捲動內容裡，邊緣也捲得到；分頁列與錯誤訊息以 `popupBar`（`safeAreaBar`）固定在上下緣，內容捲進列底下時由系統柔和邊緣模糊淡出。2026-10-12 實測：SwiftUI `Material` 與 `NSVisualEffectView(.withinWindow)` 都模糊不到捲動內容，只會疊一層白，所以不自己畫；macOS 26 以前沒有柔和邊緣，退回捲動區接在列的邊界。曾嘗試高度隨內容並錨定左上角，但 MenuBarExtra 視窗縮放時仍會跳動，因此改為固定尺寸（2026-09-13 決策）。加入帳號與新增實例在 popup 內切換畫面，不使用 sheet。
 - 字級：macOS 不支援 Dynamic Type，popup 內一律使用 `Font.scaled(_:)`，以系統文字樣式基準放大 1.2 倍；根視圖設定 `.scaled(.body)` 讓控制項文字一併放大。
 - MenuBarExtra 視窗不吃 `preferredColorScheme`，以 `PopupWindowConfigurator` 直接設定 NSWindow 為 aqua。
 - Menu bar 顯示使用者在設定勾選的帳號（不設上限，越多越長），格式為「平台單色標誌 短名稱 百分比」，以 `|` 分隔；百分比依設定的額度類型（`MenuBarQuotaMode`：段、週、月、段+週、最少，預設段+週）取時窗，帳號沒有所選的任何時窗時（例如 Copilot 只有月）退回剩餘最少的那格，沒有額度顯示 `--`；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
@@ -118,6 +118,7 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
   - Claude 正式版會刪掉 `CLAUDE_USER_DATA_DIR`，不再傳。
   - 實例資料夾名稱取 UUID 前 8 碼：VS Code 在資料夾內建立 IPC socket，完整 UUID 會超過 macOS 104 字元的 socket 路徑上限而啟動即結束。舊實例沿用已存的路徑。
   - `open` 會把呼叫端的環境變數轉交給 App，啟動時濾掉 `DYLD_*`。
+- `ps` 一律在背景執行（`InstanceManager.processList`），`refreshRunning`／`refreshCloneIcons` 為 async：程序多的機器上 `ps -axww` 要 0.5 到 3.5 秒（2026-10-12 實測 4800 個程序），原本在主執行緒同步跑，切到實例分頁整個 popup 會卡住。同一時間只跑一輪，期間再被呼叫就排到這輪之後；啟動時先抓一輪，第一次打開實例分頁狀態就是對的。
 - 執行狀態以 `ps` 比對主執行檔：`.app/Contents/MacOS/` 之前的路徑不能再有 `/Contents/`（排除 Frameworks 裡的 Helper）也不能有引號（排除 VS Code 讀 shell 環境的 `/bin/zsh -c '…/Code'`）。預設實例是原本 App 名稱（只比對名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行）、沒有 `--user-data-dir`、不在複本資料夾的那個；其他實例不看 App 名稱（複本檔名會變），只比對資料夾（等號與空格兩種寫法都認）。停止送 SIGTERM。
 - 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 與 VS Code 的登入存在各自加密的儲存區，不提供綁定，實例內自行登入一次。
 - Claude 實例（含預設）改為**自動辨識**目前登入的帳號，列上只顯示、不提供選單：讀該實例資料夾 `config.json` 的 `lastKnownAccountUuid`，同時要有非空的 `oauth:tokenCache*` 才算登入中（`lastKnown` 登出後可能殘留，這一點未實測登出行為），再對到 `Account.accountUUID`（Claude `api/oauth/profile` 的 `account.uuid`，帳號沒有時每輪補抓）。2026-10-08 實測兩者同一套編號：`~/.claude.json` 的 `oauthAccount.accountUuid` 與預設 Claude 相同，兩個實例都對到正確帳號。不能做成像 Codex 的選單：AspaceI 手上是 Claude Code 的 OAuth token，桌面 App 的登入是 claude.ai cookie 與 safeStorage 加密的 token 快取，寫不進去。登入狀態在打開實例分頁與按更新時重讀。

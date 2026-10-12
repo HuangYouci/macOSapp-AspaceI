@@ -8,57 +8,80 @@ struct MenuBarContentView: View {
     @State private var editor: Editor?
     @State private var confirmation: ConfirmationRequest?
 
+    /// popup 四周的留白。留白放在捲動區裡面，捲動區本身貼齊 popup 四邊，邊緣也捲得到。
+    private static let inset: CGFloat = 14
+
     var body: some View {
-        VStack(spacing: 10) {
-            switch editor {
-            case .account:
-                ScrollView { AccountEditorView { editor = nil }.padding(2) }
-            case .instance(let platform):
-                ScrollView { InstanceEditorView(platform: platform) { editor = nil }.padding(2) }
-            case nil:
-                header
-                switch selection {
-                case .quota:
-                    quotaView
-                case .instances:
-                    InstanceListView(onAdd: { editor = .instance($0) }, confirm: { confirmation = $0 })
-                case .settings:
-                    ScrollView { SettingsView(confirm: { confirmation = $0 }).padding(2) }
+        page
+            .popupBar(edge: .top) {
+                if editor == nil {
+                    header
+                        .padding(.horizontal, Self.inset)
+                        .padding(.top, Self.inset)
+                        .padding(.bottom, 2)
                 }
             }
+            .popupBar(edge: .bottom) {
+                if let errorMessage = accountManager.errorMessage ?? instanceManager.errorMessage {
+                    Text(errorMessage)
+                        .font(.scaled(.caption2))
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Self.inset)
+                        .padding(.vertical, 8)
+                }
+            }
+            .frame(width: 456, height: 640, alignment: .top)
+            .font(.scaled(.body))
+            .background(Color(nsColor: .windowBackgroundColor))
+            .background(PopupWindowConfigurator())
+            .environment(\.colorScheme, .light)
+            .onAppear {
+                accountManager.startAutomaticRefresh()
+                switch loginManager.phase {
+                case .idle: break
+                case .succeeded: loginManager.cancel()
+                default: editor = .account
+                }
+            }
+            .overlay {
+                if let request = confirmation {
+                    ConfirmationOverlay(request: request) { confirmation = nil }
+                }
+            }
+            .onChange(of: loginManager.phase) { _, phase in
+                if case .succeeded = phase {
+                    editor = nil
+                    loginManager.cancel()
+                }
+            }
+    }
 
-            if let errorMessage = accountManager.errorMessage ?? instanceManager.errorMessage {
-                Text(errorMessage)
-                    .font(.scaled(.caption2))
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    /// 每一頁各自一個捲動區，切頁時從頂端開始，不沿用上一頁捲到的位置。
+    @ViewBuilder
+    private var page: some View {
+        switch editor {
+        case .account:
+            scrollPage { AccountEditorView { editor = nil } }
+        case .instance(let platform):
+            scrollPage { InstanceEditorView(platform: platform) { editor = nil } }
+        case nil:
+            switch selection {
+            case .quota:
+                scrollPage { quotaView }
+            case .instances:
+                scrollPage { InstanceListView(onAdd: { editor = .instance($0) }, confirm: { confirmation = $0 }) }
+            case .settings:
+                scrollPage { SettingsView(confirm: { confirmation = $0 }) }
             }
         }
-        .padding(14)
-        .frame(width: 456, height: 640, alignment: .top)
-        .font(.scaled(.body))
-        .background(Color(nsColor: .windowBackgroundColor))
-        .background(PopupWindowConfigurator())
-        .environment(\.colorScheme, .light)
-        .onAppear {
-            accountManager.startAutomaticRefresh()
-            switch loginManager.phase {
-            case .idle: break
-            case .succeeded: loginManager.cancel()
-            default: editor = .account
-            }
-        }
-        .overlay {
-            if let request = confirmation {
-                ConfirmationOverlay(request: request) { confirmation = nil }
-            }
-        }
-        .onChange(of: loginManager.phase) { _, phase in
-            if case .succeeded = phase {
-                editor = nil
-                loginManager.cancel()
-            }
+    }
+
+    private func scrollPage<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView {
+            content()
+                .padding(Self.inset)
         }
     }
 
@@ -95,56 +118,58 @@ struct MenuBarContentView: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
         case .instances:
-            Button("更新", systemImage: "arrow.clockwise") { instanceManager.refreshRunning() }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
+            Button("更新", systemImage: "arrow.clockwise") {
+                Task { await instanceManager.refreshRunning() }
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .symbolEffect(.rotate, options: .repeating, isActive: instanceManager.isRefreshingRunning)
+            .disabled(instanceManager.isRefreshingRunning)
         case .settings:
             EmptyView()
         }
     }
 
+    @ViewBuilder
     private var quotaView: some View {
-        ScrollView {
-            if accountManager.accounts.isEmpty {
-                Text("尚未加入帳號")
-                    .font(.scaled(.callout))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 24)
-            } else {
-                QuotaTableView(
-                    accounts: accountManager.accounts,
-                    defaultClientAccountIDs: Set(PlatformKind.allCases.filter(\.supportsDefaultSwitch).compactMap { accountManager.defaultClientAccount(for: $0)?.id }),
-                    switchingPlatform: instanceManager.switchingPlatform,
-                    onSwitch: { account in
-                        Task {
-                            if let appName = await instanceManager.runningDefaultAppName(for: account.platform) {
-                                confirmation = ConfirmationRequest(
-                                    title: "切換到 \(account.label)？",
-                                    message: "\(appName) 正在執行，未儲存的內容可能遺失。",
-                                    confirmTitle: "關閉 \(appName) 並切換",
-                                    isDestructive: false
-                                ) {
-                                    Task { await instanceManager.switchDefault(to: account, accounts: accountManager) }
-                                }
-                            } else {
-                                await instanceManager.switchDefault(to: account, accounts: accountManager)
+        if accountManager.accounts.isEmpty {
+            Text("尚未加入帳號")
+                .font(.scaled(.callout))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+        } else {
+            QuotaTableView(
+                accounts: accountManager.accounts,
+                defaultClientAccountIDs: Set(PlatformKind.allCases.filter(\.supportsDefaultSwitch).compactMap { accountManager.defaultClientAccount(for: $0)?.id }),
+                switchingPlatform: instanceManager.switchingPlatform,
+                onSwitch: { account in
+                    Task {
+                        if let appName = await instanceManager.runningDefaultAppName(for: account.platform) {
+                            confirmation = ConfirmationRequest(
+                                title: "切換到 \(account.label)？",
+                                message: "\(appName) 正在執行，未儲存的內容可能遺失。",
+                                confirmTitle: "關閉 \(appName) 並切換",
+                                isDestructive: false
+                            ) {
+                                Task { await instanceManager.switchDefault(to: account, accounts: accountManager) }
                             }
-                        }
-                    },
-                    onActivate: { accountManager.activate($0) },
-                    onRemove: { account in
-                        confirmation = ConfirmationRequest(
-                            title: "刪除 \(account.label)？",
-                            message: "\(account.platform.displayName) 的登入資料會從 AspaceI 移除，官方 App 的登入不受影響。",
-                            confirmTitle: "刪除"
-                        ) {
-                            accountManager.remove(account)
+                        } else {
+                            await instanceManager.switchDefault(to: account, accounts: accountManager)
                         }
                     }
-                )
-                    .padding(2)
-            }
+                },
+                onActivate: { accountManager.activate($0) },
+                onRemove: { account in
+                    confirmation = ConfirmationRequest(
+                        title: "刪除 \(account.label)？",
+                        message: "\(account.platform.displayName) 的登入資料會從 AspaceI 移除，官方 App 的登入不受影響。",
+                        confirmTitle: "刪除"
+                    ) {
+                        accountManager.remove(account)
+                    }
+                }
+            )
         }
     }
 
