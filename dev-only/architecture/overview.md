@@ -1,8 +1,8 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-10-10
+最後更新日期：2026-10-12
 
-對應功能／commit：Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 邊界
 
@@ -64,7 +64,7 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 - Popup 固定 456 × 640，各分頁內容自行捲動。曾嘗試高度隨內容並錨定左上角，但 MenuBarExtra 視窗縮放時仍會跳動，因此改為固定尺寸（2026-09-13 決策）。加入帳號與新增實例在 popup 內切換畫面，不使用 sheet。
 - 字級：macOS 不支援 Dynamic Type，popup 內一律使用 `Font.scaled(_:)`，以系統文字樣式基準放大 1.2 倍；根視圖設定 `.scaled(.body)` 讓控制項文字一併放大。
 - MenuBarExtra 視窗不吃 `preferredColorScheme`，以 `PopupWindowConfigurator` 直接設定 NSWindow 為 aqua。
-- Menu bar 最多顯示三個使用者在設定勾選的帳號，格式為「平台單色標誌 短名稱 5h% 7d%」，以 `|` 分隔；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
+- Menu bar 顯示使用者在設定勾選的帳號（不設上限，越多越長），格式為「平台單色標誌 短名稱 百分比」，以 `|` 分隔；百分比依設定的額度類型（`MenuBarQuotaMode`：段、週、月、段+週、最少，預設段+週）取時窗，帳號沒有所選的任何時窗時（例如 Copilot 只有月）退回剩餘最少的那格，沒有額度顯示 `--`；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
 - 短名稱（`ShortLabel`，menu bar 與實例 Dock 圖示共用）：取前三字；任兩個前三字相同時保留前兩字、第三字改取各自第一個不同的字（三個以上就先分出獨一的，同組的再往後比；比到某個名稱結束時它保留原本前三字）；比到最後仍相同就第三位改用 1、2、3…（依帳號順序）。比較範圍是**所有帳號**而非只有勾選的，同一個帳號在 menu bar 與 Dock 才會是同一個短名稱。
 - App Icon 原始檔為 `Support/AppIcon.icon`（Icon Composer 格式），`build-app.sh` 以 `actool` 編譯為 `Assets.car` 與 `AppIcon.icns`；menu bar 圖示與平台單色標誌為 `Resources/Logos/*-glyph.png`。
 - 額度頁（`QuotaTableView`）每個平台一張卡片，卡片標題列同時是欄名（段／週／月），三欄在所有卡片對齊以便比較；沒有該時窗顯示「–」。只顯示百分比，不用顏色區分高低。底部顯示最近一次更新時間。
@@ -148,7 +148,7 @@ Dock 顯示的是程序所屬 bundle 的圖示，執行中無法從外部改（2
 
 - 位置：`Application Support/AspaceI/Apps.noindex/<實例 id 前 8 碼小寫>/<App 名稱> - <使用者名稱>.app`。`.noindex` 讓 Spotlight 不收錄——從 Spotlight 直接打開複本會開到預設資料夾。
 - `clonefile` 整包複製（APFS，不到 1 秒、幾乎不佔空間），不動 `Contents`、不重簽；簽章與 bundle id 不變，`codesign --verify` 與原 designated requirement 都通過，Keychain 不再詢問、TCC 權限沿用。只在 bundle 根目錄以 `NSWorkspace.setIcon` 寫 `Icon\r`（`--strict` 會因此失敗，一般驗證不受影響）。
-- 圖示：原本 App 的圖示（不是複本的，複本已帶標籤）右下角疊深色膠囊與三字短名稱（`InstanceIconRenderer`、`ShortLabel`）。帳號：Claude 取實例 `config.json` 辨識到的帳號，Codex 取綁定的帳號，短名稱與 menu bar 相同；不知道帳號時用實例名稱，與所有帳號及其他這類實例一起比。圖示上的字記在複本資料夾的 `badge` 檔（bundle 外）；帳號變了，下次啟動就重新複製一份。
+- 圖示：原本 App 的圖示（不是複本的，複本已帶標籤）右下角疊深色膠囊與三字短名稱（`InstanceIconRenderer`、`ShortLabel`）。帳號：Claude 取實例 `config.json` 辨識到的帳號，Codex 取綁定的帳號，短名稱與 menu bar 相同；不知道帳號時用實例名稱，與所有帳號及其他這類實例一起比。圖示上的字記在複本資料夾的 `badge` 檔（bundle 外）；帳號變了，下次啟動就重新複製一份。短名稱的撞名規則看所有帳號，任一帳號增刪改名或實例增刪、綁定、Claude 登入帳號變動時（`AspaceIApp` 的 `onChange`），`InstanceManager.refreshCloneIcons` 立刻對**沒在執行、已有複本**的實例重跑 `prepare`（字沒變就只沿用），避免 Dock 上兩個實例同字；執行中的改不了，下次啟動時重做；平台有更新程式在跑就整組跳過。不做定時刷新：圖示只會因為上述事件改變。
 - 原本 App 帶 `com.apple.quarantine` 時（實測 VS Code 有）複本會移除它：原版已經過使用者確認，複本換了位置會被再問一次或改從暫存路徑執行。
 - **開過的複本不能改**（2026-10-10 實測）：macOS 的「App 管理」保護在 App 開過一次之後生效，沒有該權限的 App（AspaceI）寫不進 bundle 裡任何東西——`setIcon` 回傳 false、建檔失敗；但整包改名、搬移、刪除都可以，剛複製還沒開過的也可以寫。ShipIt 是同一個開發者簽的，不受限。早期每次啟動都在原地重畫圖示，所以複本只有第一次開有圖示，之後一律「無法設定實例圖示」並退回用原本的 App 開——Dock 沒圖示，還讓原本 App 的 ShipIt 等不到程序結束，預設實例自我更新時關掉就回不來（2026-10-10 01:00 那次晚了 34 分鐘）。
 - 沿用或重做（`AppCloneService.plan`）：實例資料夾內版本最新、不比來源舊、`Icon\r` 還在、`badge` 與這次相同的複本才沿用（只改檔名；ShipIt 可能把檔名改回 `Claude.app`）。否則從版本最新的那份（可能就是這份複本自己，保留它較新的版本）`clonefile` 到 `.staging.app`、在暫存那份畫圖示，再刪掉舊的、改名到位。版本直接讀 Info.plist，`Bundle(url:)` 依路徑快取會回舊值。

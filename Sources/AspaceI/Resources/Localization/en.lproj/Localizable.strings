@@ -6,3 +6,4 @@
 "CountdownMinute" = "m";
 "CountdownSecond" = "s";
 "CountdownSeparator" = " ";
+"MenuBarQuotaLowest" = "Low";

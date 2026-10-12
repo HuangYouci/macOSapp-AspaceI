@@ -45,11 +45,49 @@ struct MenuBarQuotaItemTests {
         #expect(items.map(\.name) == ["huh"])
     }
 
-    @Test("最多三個，已刪除的帳號略過")
-    func limitsToThreeAndSkipsMissing() {
-        let accounts = (0..<4).map { _ in account(.codex, email: nil, windows: []) }
+    @Test("數量不設上限，已刪除的帳號略過")
+    func showsAllSelectedAndSkipsMissing() {
+        let accounts = (0..<5).map { _ in account(.codex, email: nil, windows: []) }
         let ids = [UUID()] + accounts.map(\.id)
         let items = MenuBarQuotaItem.items(accounts: accounts, selectedIDs: ids)
-        #expect(items.count == 2)
+        #expect(items.count == 5)
+    }
+
+    private var fullAccount: Account {
+        account(.claude, email: "a@x.com", windows: [
+            QuotaWindow(id: "5h", title: "5h", remainingPercentage: 82, resetsAt: nil, kind: .fiveHour),
+            QuotaWindow(id: "7d", title: "7d", remainingPercentage: 21, resetsAt: nil, kind: .week),
+            QuotaWindow(id: "1m", title: "1m", remainingPercentage: 55, resetsAt: nil, kind: .month)
+        ])
+    }
+
+    @Test("各額度類型只取對應時窗", arguments: [
+        (MenuBarQuotaMode.session, ["82%"]),
+        (.week, ["21%"]),
+        (.month, ["55%"]),
+        (.sessionAndWeek, ["82%", "21%"]),
+        (.lowest, ["21%"])
+    ])
+    func modeSelectsWindows(mode: MenuBarQuotaMode, expected: [String]) {
+        #expect(MenuBarQuotaItem.percentages(for: fullAccount, mode: mode) == expected)
+    }
+
+    @Test("帳號沒有所選時窗時退回剩餘最少的那格")
+    func fallsBackToLowestWhenKindMissing() {
+        let copilot = account(.githubCopilot, email: "octocat", windows: [
+            QuotaWindow(id: "premium", title: "月", remainingPercentage: 40, resetsAt: nil, kind: .month)
+        ])
+        let codex = account(.codex, email: nil, windows: [
+            QuotaWindow(id: "5h", title: "5h", remainingPercentage: 90, resetsAt: nil, kind: .fiveHour),
+            QuotaWindow(id: "7d", title: "7d", remainingPercentage: 30, resetsAt: nil, kind: .week)
+        ])
+        #expect(MenuBarQuotaItem.percentages(for: copilot, mode: .session) == ["40%"])
+        #expect(MenuBarQuotaItem.percentages(for: codex, mode: .month) == ["30%"])
+    }
+
+    @Test("沒有額度時任何類型都顯示 --", arguments: MenuBarQuotaMode.allCases)
+    func emptyQuotaShowsPlaceholder(mode: MenuBarQuotaMode) {
+        let empty = account(.antigravity, email: nil, windows: [])
+        #expect(MenuBarQuotaItem.percentages(for: empty, mode: mode) == ["--"])
     }
 }
