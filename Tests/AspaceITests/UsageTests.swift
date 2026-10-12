@@ -173,3 +173,62 @@ struct UsageSummaryTests {
         #expect(all.total.output == 118)
     }
 }
+
+struct UsagePricingTests {
+    private let pricing = UsagePricing(table: .init(source: "test", fetchedAt: "2026-10-12", models: [
+        "claude-opus-5-5": .init(input: 4e-6, output: 2e-5, cacheRead: 2e-7, cacheWrite: 5e-6, cacheWrite1h: 8e-6),
+        "gpt-6-sol": .init(input: 2e-6, output: 1e-5, cacheRead: 2e-7, cacheWrite: 2.5e-6, threshold: 272_000, inputAbove: 4e-6, outputAbove: 1.5e-5, cacheReadAbove: 4e-7),
+        "claude-haiku-4-5": .init(input: 1e-6, output: 5e-6)
+    ]))
+
+    @Test("5 分鐘與 1 小時快取寫入分開計價")
+    func claudeCacheTiers() throws {
+        let tokens = TokenCounts(input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 2_000_000, cacheWrite1h: 1_000_000)
+        let cost = try #require(pricing.cost(model: "claude-opus-5-5", tokens: tokens))
+        #expect(abs(cost - (4 + 20 + 0.2 + 5 + 8)) < 1e-9)
+    }
+
+    @Test("單次請求超過門檻整次改用長上下文價格")
+    func longContext() throws {
+        let small = try #require(pricing.cost(model: "gpt-6-sol", tokens: TokenCounts(input: 100_000, output: 1_000, cacheRead: 100_000)))
+        #expect(abs(small - (0.2 + 0.01 + 0.02)) < 1e-9)
+        let large = try #require(pricing.cost(model: "gpt-6-sol", tokens: TokenCounts(input: 100_000, output: 1_000, cacheRead: 200_000)))
+        #expect(abs(large - (0.4 + 0.015 + 0.08)) < 1e-9)
+    }
+
+    @Test("沒有快取單價時依輸入推算；日期尾碼可省略；查不到的模型不估")
+    func fallbacks() throws {
+        let cost = try #require(pricing.cost(model: "claude-haiku-4-5-20251001", tokens: TokenCounts(cacheRead: 1_000_000, cacheWrite: 1_000_000)))
+        #expect(abs(cost - (0.1 + 1.25)) < 1e-9)
+        #expect(pricing.cost(model: "gpt-5.3-codex-spark", tokens: TokenCounts(output: 1)) == nil)
+    }
+
+    @Test("內建價格表讀得到")
+    func bundledTable() {
+        #expect(UsagePricing.bundled.table.models.count > 10)
+        #expect(UsagePricing.bundled.price(for: "claude-opus-5-5") != nil)
+    }
+
+    @Test("Claude 讀出 1 小時快取寫入")
+    func parsesCacheBreakdown() throws {
+        let line = Data(#"{"timestamp":"2026-10-12T00:00:00Z","requestId":"r","message":{"id":"msg_1","model":"m","usage":{"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":20}}}}"#.utf8)
+        let entry = try #require(UsageLineParser.claudeEntry(line: line, sessionID: "s"))
+        #expect(entry.tokens.cacheWrite == 30)
+        #expect(entry.tokens.cacheWrite1h == 20)
+    }
+
+    @Test("匯出 CSV 帶時區位移，查不到價格的費用留空")
+    func exportsCSV() throws {
+        let timeZone = try #require(TimeZone(identifier: "Asia/Taipei"))
+        let hour = Date(timeIntervalSince1970: 1_791_788_400)
+        let csv = UsageExport.csv([
+            UsageRecord(hour: hour, platform: .codex, model: "a,b", tokens: TokenCounts(input: 1, output: 2), cost: nil),
+            UsageRecord(hour: hour, platform: .claude, model: "opus", tokens: TokenCounts(cacheWrite: 3, cacheWrite1h: 3), cost: 0.5)
+        ], timeZone: timeZone)
+        #expect(csv.split(separator: "\n").map(String.init) == [
+            UsageExport.header,
+            "2026-10-12T15:00:00+08:00,claude,opus,0,0,0,3,3,0.500000",
+            "2026-10-12T15:00:00+08:00,codex,\"a,b\",1,2,0,0,0,"
+        ])
+    }
+}

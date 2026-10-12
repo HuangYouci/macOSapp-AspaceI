@@ -10,11 +10,16 @@ enum UsageLineParser {
               let usage = message["usage"] as? [String: Any],
               let model = message["model"] as? String, model != "<synthetic>",
               let timestamp = root["timestamp"] as? String, let time = epochSeconds(iso8601: timestamp) else { return nil }
+        // 有 5 分鐘／1 小時的細項就以細項為準，沒有就全算 5 分鐘（同 ccusage）。
+        let breakdown = usage["cache_creation"] as? [String: Any]
+        let write5m = breakdown.map { int($0["ephemeral_5m_input_tokens"]) }
+        let write1h = breakdown.map { int($0["ephemeral_1h_input_tokens"]) } ?? 0
         let tokens = TokenCounts(
             input: int(usage["input_tokens"]),
             output: int(usage["output_tokens"]),
             cacheRead: int(usage["cache_read_input_tokens"]),
-            cacheWrite: int(usage["cache_creation_input_tokens"])
+            cacheWrite: write5m.map { $0 + write1h } ?? int(usage["cache_creation_input_tokens"]),
+            cacheWrite1h: write1h
         )
         let messageID = message["id"] as? String ?? ""
         var identity = messageID

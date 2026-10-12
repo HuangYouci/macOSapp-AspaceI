@@ -51,6 +51,8 @@ GitHub Copilot 已於 26.10.12 之後移除；舊版加入的 GitHub 帳號會�
 
 - 只讀本機檔案，不上傳。
 - 用量另存一份在 AspaceI 自己的歷史裡，對話紀錄刪掉之後統計仍在。
+- 費用是照 API 牌價估算（價格表取自 LiteLLM，與 ccusage 同源），不是訂閱實際付的金額。
+- 設定頁可匯出成 CSV。
 - 細節見 `dev-only/usage-stats/overview.md`。
 
 ### 實例

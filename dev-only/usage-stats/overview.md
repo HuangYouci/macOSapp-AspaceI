@@ -2,7 +2,7 @@
 
 最後更新日期：2026-10-12
 
-對應功能／commit：popup「用量」分頁（今日每小時、7 日／30 日／全部每日、模型）；用量歷史由 AspaceI 自己保存；不分帳號
+對應功能／commit：用量費用（API 牌價估算）與 CSV 匯出；popup「用量」分頁（今日每小時、7 日／30 日／全部每日、模型）；用量歷史由 AspaceI 自己保存；不分帳號
 
 ## 資料來源
 
@@ -21,6 +21,21 @@ Copilot 與 Antigravity 未支援：這台 Mac 的 Copilot 沒有開 OTel 匯出
 - **Claude 去重**：鍵為 `message.id` + `requestId`（沒有 requestId 時加對話編號，非 `msg_` 開頭再加時間）。同一則回應逐個 content block 各寫一行，後面的 output 才完整，所以重複時留 token 多的那筆。續接、分叉的對話會把歷史抄進新檔，跨檔也要去重——只做單檔去重會多算 5～6%（實測）。`<synthetic>` 模型略過。
 - **Codex**：用 `last_token_usage`（本輪值）；`total_token_usage` 沒前進代表同一輪重複送出，略過；沒有本輪值就拿累計值相減。`input_tokens` 含快取讀取要扣掉，reasoning 已含在 output。2026-10-12 檢查這台 Mac 的分叉子代理檔，用量從零起算，沒有重播父對話的事件，所以沒有實作 ccusage 的重播偵測。
 - **日期**：以使用者目前時區切日。快取存的是事件時間（epoch 秒），換時區不必重掃。
+
+## 費用
+
+畫面上的費用是「同樣用量照 API 牌價要多少錢」，不是訂閱實際付的金額。
+
+- **價格來源**：LiteLLM 的公開價格表 `model_prices_and_context_window.json`，與 ccusage 同源。由 `dev-only/usage-stats/update-pricing.py` 抓下來、只留 `claude-*` 與 `gpt-*`，產生 `Sources/AspaceI/Resources/Pricing/model-prices.json` 打包進 App；設定頁顯示來源與抓取日期。App 不在執行時連網抓價格。新模型上市或調價時重跑腳本再建置。只有 `chatgpt/` 前綴的模型（例如 `gpt-5.3-codex-spark`）若沒有單價就不估，畫面顯示「–」。
+- **權威性**：LiteLLM 是社群維護的表，數字抄自各家官方價目頁；真正的權威只有 Anthropic／OpenAI 的價目頁與帳單。這裡能保證的是算法與 ccusage 一致。
+- **公式**（同 ccusage）：輸入×輸入價 + 輸出×輸出價 + 快取讀取×讀取價 + 5 分鐘快取寫入×寫入價 + 1 小時快取寫入×1 小時寫入價。快取沒有單價時，寫入以輸入×1.25、讀取以輸入×0.1、1 小時寫入以輸入×2 計。模型名稱帶日期尾碼（`-20251001`）查不到時去掉尾碼再查。
+- **長上下文**：價格表有 `*_above_<N>k_tokens` 的模型（目前是 GPT 系列的 272k），單次請求的輸入＋快取讀寫超過門檻時，整次改用較高的價格。Codex 的 priority／flex 服務層級沒有記錄，一律以標準價計。
+- **1 小時快取**：Claude Code 目前的快取寫入全是 1 小時的（2026-10-12 抽查最近 40 個對話：4.24 億 token 全在 `ephemeral_1h_input_tokens`），1 小時的寫入價比 5 分鐘的高 60%，所以要分開記。為此解析版本升到 2（`UsageFileRecord.currentRevision`），記錄檔還在的會整個重讀。
+- **驗證**：2026-10-12 以 ccusage 20.0.26 離線模式對帳 10/6～10/12。claude-opus-5-5 與 gpt-6-luna 的每日費用逐一相同；ccusage 這版內建的價格表沒有 claude-sonnet-5-5，把它算成 $0，所以有 sonnet 的日子 ccusage 較低。
+
+## 匯出
+
+設定頁「用量 → 匯出用量」輸出 CSV：每小時、每個模型一列，欄位為 `hour`（帶時區位移）、`platform`、`model`、輸入／輸出／快取讀取／快取寫入／其中 1 小時快取寫入的 token，以及 `cost_usd`（查不到價格時留空）。
 
 ## 不分帳號（2026-10-12 決策）
 

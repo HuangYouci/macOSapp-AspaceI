@@ -3,10 +3,12 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(SettingsManager.self) private var settingsManager
     @Environment(AccountManager.self) private var accountManager
+    @Environment(UsageManager.self) private var usageManager
     /// 二次確認交給 popup 外層呈現：MenuBarExtra 的面板收不到系統對話框的點擊。
     let confirm: (ConfirmationRequest) -> Void
     @State private var exportDocument: AccountExportDocument?
     @State private var showsImporter = false
+    @State private var usageExport: AccountExportDocument?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -85,6 +87,45 @@ struct SettingsView: View {
                         })
                     }
                     .disabled(accountManager.accounts.isEmpty)
+                }
+            }
+
+            section("用量") {
+                row {
+                    Text("匯出用量")
+                    Spacer()
+                    Button("匯出…") {
+                        usageExport = AccountExportDocument(data: Data(UsageExport.csv(usageManager.records, timeZone: .current).utf8))
+                    }
+                    .disabled(usageManager.records.isEmpty)
+                    .fileExporter(
+                        isPresented: Binding(get: { usageExport != nil }, set: { if !$0 { usageExport = nil } }),
+                        document: usageExport,
+                        contentType: .commaSeparatedText,
+                        defaultFilename: "AspaceI-usage"
+                    ) { result in
+                        if case .failure(let error) = result {
+                            usageManager.errorMessage = error.localizedDescription
+                        }
+                        usageExport = nil
+                    }
+                }
+                if let source = URL(string: UsagePricing.bundled.table.source) {
+                    rowDivider
+                    Link(destination: source) {
+                        row {
+                            Text("價格表")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("LiteLLM · \(UsagePricing.bundled.table.fetchedAt)")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "arrow.up.right")
+                                .font(.scaled(.caption))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 

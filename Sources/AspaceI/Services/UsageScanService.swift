@@ -38,7 +38,7 @@ actor UsageScanService {
 
         let pending = files.filter { file in
             guard let record = history.files[file.url.path] else { return true }
-            return record.size != file.size || record.modified != file.modified
+            return !record.isCurrentRevision || record.size != file.size || record.modified != file.modified
         }
         let existing = history.files
         let logger = logger
@@ -118,8 +118,8 @@ actor UsageScanService {
 
     /// 檔案只會往後寫：有舊紀錄就從上次讀到的位置接著讀；檔案變小（被重寫）則整個重讀。
     static func parse(_ file: DiscoveredFile, existing: UsageFileRecord?) throws -> UsageFileRecord {
-        var record = existing.flatMap { $0.platform == file.platform && $0.offset <= file.size ? $0 : nil }
-            ?? UsageFileRecord(platform: file.platform, session: file.session)
+        var record = existing.flatMap { $0.platform == file.platform && $0.isCurrentRevision && $0.offset <= file.size ? $0 : nil }
+            ?? UsageFileRecord(revision: UsageFileRecord.currentRevision, platform: file.platform, session: file.session)
         record.session = file.session
         switch file.platform {
         case .claude:
@@ -152,7 +152,7 @@ actor UsageScanService {
 
     // MARK: - 彙總
 
-    static func aggregate(files: [String: UsageFileRecord], timeZone: TimeZone) -> [UsageRecord] {
+    static func aggregate(files: [String: UsageFileRecord], timeZone: TimeZone, pricing: UsagePricing = .bundled) -> [UsageRecord] {
         struct BucketKey: Hashable {
             let hour: Date
             let platform: PlatformKind
@@ -171,7 +171,16 @@ actor UsageScanService {
             return hour
         }
 
-        var buckets: [BucketKey: TokenCounts] = [:]
+        var buckets: [BucketKey: (tokens: TokenCounts, cost: Double?)] = [:]
+        func add(_ entry: UsageEntry, platform: PlatformKind) {
+            let key = BucketKey(hour: hour(for: entry.time), platform: platform, model: entry.model)
+            let cost = pricing.cost(model: entry.model, tokens: entry.tokens)
+            let previous = buckets[key]
+            buckets[key] = (
+                (previous?.tokens ?? TokenCounts()) + entry.tokens,
+                cost.map { $0 + (previous?.cost ?? 0) } ?? previous?.cost
+            )
+        }
         let ordered = files.sorted { $0.key < $1.key }
 
         // Claude：續接或分叉的對話會把歷史抄進新檔，同一則回應跨檔只算一次，留 token 較多的那筆。
@@ -184,7 +193,7 @@ actor UsageScanService {
             }
         }
         for entry in claude.values {
-            buckets[BucketKey(hour: hour(for: entry.time), platform: .claude, model: entry.model), default: TokenCounts()] += entry.tokens
+            add(entry, platform: .claude)
         }
 
         // Codex：封存會把檔案從 sessions 搬到 archived_sessions，同名的只取讀到比較多的那份。
@@ -195,13 +204,12 @@ actor UsageScanService {
         }
         for record in codex.values {
             for index in 0..<record.count {
-                let entry = record.entry(at: index)
-                buckets[BucketKey(hour: hour(for: entry.time), platform: .codex, model: entry.model), default: TokenCounts()] += entry.tokens
+                add(record.entry(at: index), platform: .codex)
             }
         }
 
         return buckets
-            .map { UsageRecord(hour: $0.key.hour, platform: $0.key.platform, model: $0.key.model, tokens: $0.value) }
+            .map { UsageRecord(hour: $0.key.hour, platform: $0.key.platform, model: $0.key.model, tokens: $0.value.tokens, cost: $0.value.cost) }
             .sorted { ($0.hour, $0.platform.rawValue, $0.model) < ($1.hour, $1.platform.rawValue, $1.model) }
     }
 

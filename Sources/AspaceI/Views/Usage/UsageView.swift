@@ -7,8 +7,8 @@ struct UsageView: View {
     @Binding var range: UsageRange
     @State private var hoveredPeriod: Date?
 
-    private static let valueWidth: CGFloat = 66
-    private static let columns = ["輸入", "輸出", "快取"]
+    private static let valueWidth: CGFloat = 58
+    private static let columns = ["輸入", "輸出", "快取", "費用"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -22,7 +22,7 @@ struct UsageView: View {
             .fixedSize()
 
             if let summary {
-                totals(summary.total)
+                totals(summary.total, cost: summary.totalCost)
                 periodCard(summary)
                 modelCard(summary.models)
             } else {
@@ -31,14 +31,14 @@ struct UsageView: View {
         }
     }
 
-    private func totals(_ tokens: TokenCounts) -> some View {
+    private func totals(_ tokens: TokenCounts, cost: Double) -> some View {
         HStack(spacing: 0) {
-            ForEach(Array(zip(Self.columns, [tokens.input, tokens.output, tokens.cache])), id: \.0) { title, value in
+            ForEach(Array(zip(Self.columns, [Self.format(tokens.input), Self.format(tokens.output), Self.format(tokens.cache), Self.formatCost(cost)])), id: \.0) { title, value in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.scaled(.caption2, weight: .medium))
                         .foregroundStyle(.tertiary)
-                    Text(Self.format(value))
+                    Text(value)
                         .font(.scaled(.title3, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
@@ -62,7 +62,7 @@ struct UsageView: View {
             header(summary.isHourly ? "每小時" : "每日")
             ForEach(Array(summary.periods.reversed().enumerated()), id: \.element.id) { index, period in
                 if index > 0 { Divider().padding(.leading, 14) }
-                valueRow(title: periodTitle(period.start, hourly: summary.isHourly), platform: nil, tokens: period.tokens)
+                valueRow(title: periodTitle(period.start, hourly: summary.isHourly), platform: nil, tokens: period.tokens, cost: period.tokens.isZero ? nil : period.cost)
             }
         }
         .padding(.bottom, 4)
@@ -120,12 +120,12 @@ struct UsageView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(periodTitle(period.start, hourly: hourly))
                 .font(.scaled(.caption2, weight: .semibold))
-            ForEach(Array(zip(Self.columns, [period.tokens.input, period.tokens.output, period.tokens.cache])), id: \.0) { title, value in
+            ForEach(Array(zip(Self.columns, [period.tokens.input.formatted(), period.tokens.output.formatted(), period.tokens.cache.formatted(), Self.formatCost(period.cost)])), id: \.0) { title, value in
                 HStack(spacing: 8) {
                     Text(title)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
-                    Text(value.formatted())
+                    Text(value)
                         .monospacedDigit()
                 }
                 .font(.scaled(.caption2))
@@ -151,7 +151,7 @@ struct UsageView: View {
             }
             ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
                 if index > 0 { Divider().padding(.leading, 14) }
-                valueRow(title: model.name, platform: model.platform, tokens: model.tokens)
+                valueRow(title: model.name, platform: model.platform, tokens: model.tokens, cost: model.cost)
             }
         }
         .padding(.bottom, 4)
@@ -175,7 +175,7 @@ struct UsageView: View {
         .padding(.bottom, 6)
     }
 
-    private func valueRow(title: String, platform: PlatformKind?, tokens: TokenCounts) -> some View {
+    private func valueRow(title: String, platform: PlatformKind?, tokens: TokenCounts, cost: Double?) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 7) {
                 if let platform {
@@ -188,10 +188,10 @@ struct UsageView: View {
                     .truncationMode(.middle)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            ForEach(Array([tokens.input, tokens.output, tokens.cache].enumerated()), id: \.offset) { _, value in
-                Text(value == 0 ? "–" : Self.format(value))
+            ForEach(Array([tokens.input, tokens.output, tokens.cache].map { $0 == 0 ? nil : Self.format($0) }.enumerated()) + [(3, cost.map(Self.formatCost))], id: \.0) { _, value in
+                Text(value ?? "–")
                     .font(.scaled(.subheadline, weight: .medium, design: .rounded))
-                    .foregroundStyle(value == 0 ? .quaternary : .primary)
+                    .foregroundStyle(value == nil ? .quaternary : .primary)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -217,6 +217,11 @@ struct UsageView: View {
                     .shimmering(cornerRadius: 12)
             }
         }
+    }
+
+    /// 美元：一百以上不帶小數。不用貨幣格式：中文語系會寫成「US$」，欄位放不下。
+    static func formatCost(_ value: Double) -> String {
+        "$" + value.formatted(.number.grouping(.automatic).precision(.fractionLength(value >= 100 ? 0 : 2)))
     }
 
     /// 依語系縮寫：中文為「1.52億」，英文為「152M」。

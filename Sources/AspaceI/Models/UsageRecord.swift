@@ -7,6 +7,8 @@ struct TokenCounts: Equatable, Hashable, Sendable {
     var output = 0
     var cacheRead = 0
     var cacheWrite = 0
+    /// `cacheWrite` 裡寫進 1 小時快取的部分；價格比 5 分鐘的高（Claude Code 目前全用 1 小時）。
+    var cacheWrite1h = 0
 
     var cache: Int { cacheRead + cacheWrite }
     var total: Int { input + output + cacheRead + cacheWrite }
@@ -17,7 +19,8 @@ struct TokenCounts: Equatable, Hashable, Sendable {
             input: lhs.input + rhs.input,
             output: lhs.output + rhs.output,
             cacheRead: lhs.cacheRead + rhs.cacheRead,
-            cacheWrite: lhs.cacheWrite + rhs.cacheWrite
+            cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
+            cacheWrite1h: lhs.cacheWrite1h + rhs.cacheWrite1h
         )
     }
 
@@ -43,4 +46,6 @@ struct UsageRecord: Equatable, Sendable {
     let platform: PlatformKind
     let model: String
     var tokens: TokenCounts
+    /// 依 API 牌價估的美元；價格表沒有這個模型時為 nil。
+    var cost: Double?
 }

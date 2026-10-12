@@ -21,12 +21,16 @@ struct UsageSummary: Equatable, Sendable {
         let name: String
         let platform: PlatformKind
         let tokens: TokenCounts
+        /// 價格表沒有這個模型時為 nil。
+        let cost: Double?
         var id: String { name }
     }
 
     struct Period: Equatable, Identifiable, Sendable {
         let start: Date
         let tokens: TokenCounts
+        /// 只加總查得到價格的模型。
+        let cost: Double
         var id: Date { start }
     }
 
@@ -35,6 +39,7 @@ struct UsageSummary: Equatable, Sendable {
     let periods: [Period]
     let models: [Model]
     let total: TokenCounts
+    let totalCost: Double
 
     init(records: [UsageRecord], range: UsageRange, now: Date, calendar: Calendar) {
         let todayStart = calendar.startOfDay(for: now)
@@ -49,25 +54,28 @@ struct UsageSummary: Equatable, Sendable {
         let inRange = records.filter { $0.hour >= firstDay && $0.hour <= now }
 
         let unit: Calendar.Component = isHourly ? .hour : .day
-        var byPeriod: [Date: TokenCounts] = [:]
-        var byModel: [String: (PlatformKind, TokenCounts)] = [:]
+        var byPeriod: [Date: (tokens: TokenCounts, cost: Double)] = [:]
+        var byModel: [String: (platform: PlatformKind, tokens: TokenCounts, cost: Double?)] = [:]
         for record in inRange {
             let start = isHourly ? record.hour : calendar.startOfDay(for: record.hour)
-            byPeriod[start, default: TokenCounts()] += record.tokens
-            byModel[record.model, default: (record.platform, TokenCounts())].1 += record.tokens
+            let period = byPeriod[start] ?? (TokenCounts(), 0)
+            byPeriod[start] = (period.tokens + record.tokens, period.cost + (record.cost ?? 0))
+            let model = byModel[record.model] ?? (record.platform, TokenCounts(), nil)
+            byModel[record.model] = (model.platform, model.tokens + record.tokens, record.cost.map { $0 + (model.cost ?? 0) } ?? model.cost)
         }
         var periods: [Period] = []
         var cursor = firstDay
         let last = isHourly ? (calendar.dateInterval(of: .hour, for: now)?.start ?? now) : todayStart
         while cursor <= last {
-            periods.append(Period(start: cursor, tokens: byPeriod[cursor] ?? TokenCounts()))
+            periods.append(Period(start: cursor, tokens: byPeriod[cursor]?.tokens ?? TokenCounts(), cost: byPeriod[cursor]?.cost ?? 0))
             guard let next = calendar.date(byAdding: unit, value: 1, to: cursor) else { break }
             cursor = next
         }
         self.periods = periods
         models = byModel
-            .map { Model(name: $0.key, platform: $0.value.0, tokens: $0.value.1) }
+            .map { Model(name: $0.key, platform: $0.value.platform, tokens: $0.value.tokens, cost: $0.value.cost) }
             .sorted { ($0.tokens.total, $1.name) > ($1.tokens.total, $0.name) }
         total = inRange.reduce(TokenCounts()) { $0 + $1.tokens }
+        totalCost = inRange.reduce(0) { $0 + ($1.cost ?? 0) }
     }
 }
