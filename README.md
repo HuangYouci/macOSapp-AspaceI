@@ -46,10 +46,10 @@ AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex
 
 ### 用量
 
-讀這台 Mac 上 Claude Code 與 Codex 的對話紀錄，依使用者時區列出每日、模型、帳號的輸入／輸出／快取 token。點帳號只看該帳號。
+讀這台 Mac 上 Claude Code 與 Codex 的對話紀錄，依使用者時區列出今日每小時、7 日／30 日／全部每日，以及各模型的輸入／輸出／快取 token。
 
 - 只讀本機檔案，不上傳。
-- 帳號是從桌面 App 的對話清單對應出來的，AspaceI 開始記錄之前已封存的對話會列為「未歸屬」。
+- 用量另存一份在 AspaceI 自己的歷史裡，對話紀錄刪掉之後統計仍在。
 - 細節見 `dev-only/usage-stats/overview.md`。
 
 ### 實例
@@ -118,7 +118,7 @@ cp -R dist/AspaceI.app /Applications/
 | --- | --- |
 | Token、refresh token | Keychain：`com.huangyouci.AspaceI` / `credentials-vault` |
 | 帳號清單、額度快取 | `~/Library/Application Support/AspaceI/` |
-| 用量快取與帳號對照 | `~/Library/Application Support/AspaceI/usage-cache.plist`、`usage-owners.json` |
+| 用量歷史 | `~/Library/Application Support/AspaceI/usage-history.plist` |
 | 實例設定與資料夾 | `~/Library/Application Support/AspaceI/` |
 | 實例用的 App 複本 | `~/Library/Application Support/AspaceI/Apps.noindex/` |
 

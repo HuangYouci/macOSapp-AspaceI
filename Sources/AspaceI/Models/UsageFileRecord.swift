@@ -1,7 +1,7 @@
 import Foundation
 
-/// 一個記錄檔已經讀出來的用量，存進快取；檔案變大時從 `offset` 接著讀。
-/// 原始檔被官方客戶端清掉之後這份仍然保留，所以統計可以回溯到比記錄檔更早。
+/// 一個記錄檔已經讀出來的用量；檔案變大時從 `offset` 接著讀。
+/// 原始檔被刪掉之後這份仍然保留：使用者會定期刪對話，統計不能跟著消失。
 struct UsageFileRecord: Codable, Equatable, Sendable {
     var platform: PlatformKind
     /// Claude：對話編號（子代理的檔案歸到父對話）；Codex：檔名（不含副檔名）。
@@ -9,8 +9,6 @@ struct UsageFileRecord: Codable, Equatable, Sendable {
     var size = 0
     var modified = 0.0
     var offset = 0
-    /// Claude 記錄檔內自帶的帳號編號，只有部分對話有。
-    var accountUUID: String?
     var codexState: UsageLineParser.CodexState?
 
     // 每筆用量拆成平行陣列：幾十萬筆存成物件陣列，快取檔會大好幾倍。
@@ -61,19 +59,11 @@ struct UsageFileRecord: Codable, Equatable, Sendable {
     }
 }
 
-struct UsageCache: Codable, Equatable, Sendable {
+/// AspaceI 自己保存的用量歷史。記錄檔刪了這裡還在，所以不是可以隨意丟掉重建的快取。
+struct UsageHistory: Codable, Equatable, Sendable {
     static let currentVersion = 1
 
-    var version = UsageCache.currentVersion
+    var version = UsageHistory.currentVersion
     /// 記錄檔路徑 → 已讀出的用量。
     var files: [String: UsageFileRecord] = [:]
-}
-
-/// 用量屬於哪個帳號。記錄檔本身幾乎不帶帳號，只能在對話還在的時候從旁邊的資料記下來，
-/// 所以這份對照表不能重建，獨立存一個檔。
-struct UsageOwners: Codable, Equatable, Sendable {
-    /// Claude 對話編號 → 平台帳號編號。
-    var claude: [String: String] = [:]
-    /// Codex 對話檔名 → AspaceI 帳號 id。
-    var codex: [String: String] = [:]
 }

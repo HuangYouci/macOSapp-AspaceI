@@ -55,7 +55,7 @@ struct AspaceIApp: App {
                     instanceManager.startMonitoring(accounts: accountManager)
                     await accountManager.autoImportLocalAccounts()
                     accountManager.startAutomaticRefresh()
-                    usageManager.startAutomaticRefresh(accounts: accountManager, instances: instanceManager)
+                    usageManager.startAutomaticRefresh(instances: instanceManager)
                 }
         }
         .menuBarExtraStyle(.window)

@@ -8,8 +8,7 @@ struct MenuBarContentView: View {
     @State private var selection = Section.quota
     @State private var editor: Editor?
     @State private var confirmation: ConfirmationRequest?
-    @State private var usageRange = UsageRange.week
-    @State private var usageFilter: UsageOwnerKey?
+    @State private var usageRange = UsageRange.today
 
     /// popup 四周的留白。留白放在捲動區裡面，捲動區本身貼齊 popup 四邊，邊緣也捲得到。
     private static let inset: CGFloat = 14
@@ -103,7 +102,14 @@ struct MenuBarContentView: View {
 
             Spacer(minLength: 4)
 
-            actions
+            // 內容會捲到列底下，按鈕要有底才看得出是按鈕；樣式與分頁那組一致。
+            if selection != .settings {
+                HStack(spacing: 2) {
+                    actions
+                }
+                .padding(2)
+                .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            }
         }
     }
 
@@ -113,50 +119,41 @@ struct MenuBarContentView: View {
         case .quota:
             // 一輪要跑完所有帳號約數秒，期間按鈕是停用的。沒有進行中的訊號時，圖示只是變灰再變回來，
             // 百分比與「更新於」又常常原封不動，按下去看起來就像沒有反應。
-            Button("更新", systemImage: "arrow.clockwise") {
+            refreshButton(isBusy: accountManager.isRefreshing) {
                 Task { await accountManager.refreshAllQuotas() }
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .symbolEffect(.rotate, options: .repeating, isActive: accountManager.isRefreshing)
-            .disabled(accountManager.isRefreshing)
-            Button("加入帳號", systemImage: "plus") { editor = .account }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
+            headerButton("加入帳號", systemImage: "plus") { editor = .account }
         case .usage:
-            Button("更新", systemImage: "arrow.clockwise") {
-                Task { await usageManager.refresh(accounts: accountManager, instances: instanceManager) }
+            refreshButton(isBusy: usageManager.isScanning) {
+                Task { await usageManager.refresh(instances: instanceManager) }
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .symbolEffect(.rotate, options: .repeating, isActive: usageManager.isScanning)
-            .disabled(usageManager.isScanning)
         case .instances:
-            Button("更新", systemImage: "arrow.clockwise") {
+            refreshButton(isBusy: instanceManager.isRefreshingRunning) {
                 Task { await instanceManager.refreshRunning() }
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .symbolEffect(.rotate, options: .repeating, isActive: instanceManager.isRefreshingRunning)
-            .disabled(instanceManager.isRefreshingRunning)
         case .settings:
             EmptyView()
         }
     }
 
+    private func refreshButton(isBusy: Bool, action: @escaping () -> Void) -> some View {
+        headerButton("更新", systemImage: "arrow.clockwise", action: action)
+            .symbolEffect(.rotate, options: .repeating, isActive: isBusy)
+            .disabled(isBusy)
+    }
+
+    private func headerButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(title, systemImage: systemImage, action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .frame(width: 28, height: 24)
+            .contentShape(Rectangle())
+    }
+
     private var usageView: some View {
         UsageView(
-            summary: usageManager.hasScanned ? UsageSummary(
-                records: usageManager.records,
-                range: usageRange,
-                filter: usageFilter,
-                accounts: accountManager.accounts,
-                today: Date(),
-                calendar: .current
-            ) : nil,
-            range: $usageRange,
-            filter: $usageFilter,
-            filterTitle: usageFilter.map { UsageSummary.title(for: $0, accounts: accountManager.accounts) }
+            summary: usageManager.hasScanned ? UsageSummary(records: usageManager.records, range: usageRange, now: Date(), calendar: .current) : nil,
+            range: $usageRange
         )
     }
 

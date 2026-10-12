@@ -36,13 +36,11 @@ struct UsageEntry: Equatable, Sendable {
     var tokens: TokenCounts
 }
 
-/// 彙總後的一格：某一天、某平台、某模型、某個擁有者的用量。
+/// 彙總後的一格：某個小時、某平台、某模型的用量。
 struct UsageRecord: Equatable, Sendable {
-    /// 使用者時區當天 00:00。
-    let day: Date
+    /// 使用者時區該小時的開始。
+    let hour: Date
     let platform: PlatformKind
     let model: String
-    /// Claude 為平台帳號編號（`Account.accountUUID`），Codex 為 AspaceI 帳號 id；nil 表示無法歸屬。
-    let owner: String?
     var tokens: TokenCounts
 }

@@ -1,32 +1,17 @@
 import Charts
 import SwiftUI
 
-/// 本機用量：區間合計、每日、模型、帳號。資料與篩選都由外部注入。
+/// 本機用量：區間合計、每日（今日為每小時）、模型。資料與區間都由外部注入。
 struct UsageView: View {
     let summary: UsageSummary?
     @Binding var range: UsageRange
-    @Binding var filter: UsageOwnerKey?
-    let filterTitle: String?
+    @State private var hoveredPeriod: Date?
 
     private static let valueWidth: CGFloat = 66
     private static let columns = ["輸入", "輸出", "快取"]
 
     var body: some View {
-        VStack(spacing: 10) {
-            controls
-            if let summary {
-                totals(summary.total)
-                dailyCard(summary.days)
-                tableCard("模型", rows: summary.models, selectable: false)
-                tableCard("帳號", rows: summary.owners, selectable: true)
-            } else {
-                skeleton
-            }
-        }
-    }
-
-    private var controls: some View {
-        HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Picker("區間", selection: $range) {
                 ForEach(UsageRange.allCases) { range in
                     Text(range.title).tag(range)
@@ -35,23 +20,13 @@ struct UsageView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            Spacer(minLength: 4)
-            if let filterTitle {
-                Button {
-                    filter = nil
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(filterTitle)
-                            .lineLimit(1)
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tertiary)
-                    }
-                    .font(.scaled(.caption))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.05), in: Capsule())
-                }
-                .buttonStyle(.plain)
+
+            if let summary {
+                totals(summary.total)
+                periodCard(summary)
+                modelCard(summary.models)
+            } else {
+                skeleton
             }
         }
     }
@@ -77,42 +52,96 @@ struct UsageView: View {
         .cardStyle()
     }
 
-    private func dailyCard(_ days: [UsageSummary.Day]) -> some View {
+    private func periodCard(_ summary: UsageSummary) -> some View {
         VStack(spacing: 0) {
-            header("每日")
-            Chart(days) { day in
-                BarMark(x: .value("日", day.day, unit: .day), y: .value("tokens", day.tokens.output))
-                    .foregroundStyle(by: .value("種類", "輸出"))
-                BarMark(x: .value("日", day.day, unit: .day), y: .value("tokens", day.tokens.input))
-                    .foregroundStyle(by: .value("種類", "輸入"))
-            }
-            .chartForegroundStyleScale(["輸出": Color.accentColor, "輸入": Color.accentColor.opacity(0.35)])
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine()
-                    AxisValueLabel {
-                        if let number = value.as(Int.self) { Text(Self.format(number)) }
-                    }
-                }
-            }
-            .chartLegend(.hidden)
-            .frame(height: 110)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 8)
-
-            ForEach(Array(days.reversed().enumerated()), id: \.element.id) { index, day in
-                Divider().padding(.leading, 14)
-                valueRow(title: day.day.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated)), platform: nil, tokens: day.tokens, isSelected: false)
+            chart(summary)
+                .frame(height: 110)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+            header(summary.isHourly ? "每小時" : "每日")
+            ForEach(Array(summary.periods.reversed().enumerated()), id: \.element.id) { index, period in
+                if index > 0 { Divider().padding(.leading, 14) }
+                valueRow(title: periodTitle(period.start, hourly: summary.isHourly), platform: nil, tokens: period.tokens)
             }
         }
         .padding(.bottom, 4)
         .cardStyle()
     }
 
-    private func tableCard(_ title: String, rows: [UsageSummary.Row], selectable: Bool) -> some View {
+    private func chart(_ summary: UsageSummary) -> some View {
+        let unit: Calendar.Component = summary.isHourly ? .hour : .day
+        let hovered = summary.periods.first { $0.start == hoveredPeriod }
+        return Chart {
+            ForEach(summary.periods) { period in
+                BarMark(x: .value("時間", period.start, unit: unit), y: .value("tokens", period.tokens.output))
+                    .foregroundStyle(by: .value("種類", "輸出"))
+                    .opacity(hovered == nil || hovered?.start == period.start ? 1 : 0.4)
+                BarMark(x: .value("時間", period.start, unit: unit), y: .value("tokens", period.tokens.input))
+                    .foregroundStyle(by: .value("種類", "輸入"))
+                    .opacity(hovered == nil || hovered?.start == period.start ? 1 : 0.4)
+            }
+            if let hovered {
+                RuleMark(x: .value("時間", hovered.start, unit: unit))
+                    .foregroundStyle(Color.secondary.opacity(0.25))
+                    .annotation(position: .top, spacing: 2, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                        hoverCard(hovered, hourly: summary.isHourly)
+                    }
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        guard case .active(let location) = phase, let plotFrame = proxy.plotFrame,
+                              let date: Date = proxy.value(atX: location.x - geometry[plotFrame].origin.x) else {
+                            hoveredPeriod = nil
+                            return
+                        }
+                        hoveredPeriod = summary.periods.last { $0.start <= date }?.start
+                    }
+            }
+        }
+        .chartForegroundStyleScale(["輸出": Color.accentColor, "輸入": Color.accentColor.opacity(0.35)])
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let number = value.as(Int.self) { Text(Self.format(number)) }
+                }
+            }
+        }
+        .chartLegend(.hidden)
+    }
+
+    private func hoverCard(_ period: UsageSummary.Period, hourly: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(periodTitle(period.start, hourly: hourly))
+                .font(.scaled(.caption2, weight: .semibold))
+            ForEach(Array(zip(Self.columns, [period.tokens.input, period.tokens.output, period.tokens.cache])), id: \.0) { title, value in
+                HStack(spacing: 8) {
+                    Text(title)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Text(value.formatted())
+                        .monospacedDigit()
+                }
+                .font(.scaled(.caption2))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(width: 150)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+    }
+
+    private func modelCard(_ models: [UsageSummary.Model]) -> some View {
         VStack(spacing: 0) {
-            header(title)
-            if rows.isEmpty {
+            header("模型")
+            if models.isEmpty {
                 Text("沒有用量")
                     .font(.scaled(.caption))
                     .foregroundStyle(.tertiary)
@@ -120,20 +149,9 @@ struct UsageView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
             }
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
                 if index > 0 { Divider().padding(.leading, 14) }
-                if selectable, let platform = row.platform {
-                    let key = ownerKey(rowID: row.id, platform: platform)
-                    Button {
-                        filter = filter == key ? nil : key
-                    } label: {
-                        valueRow(title: row.title, platform: platform, tokens: row.tokens, isSelected: filter == key)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    valueRow(title: row.title, platform: row.platform, tokens: row.tokens, isSelected: false)
-                }
+                valueRow(title: model.name, platform: model.platform, tokens: model.tokens)
             }
         }
         .padding(.bottom, 4)
@@ -157,15 +175,15 @@ struct UsageView: View {
         .padding(.bottom, 6)
     }
 
-    private func valueRow(title: String, platform: PlatformKind?, tokens: TokenCounts, isSelected: Bool) -> some View {
+    private func valueRow(title: String, platform: PlatformKind?, tokens: TokenCounts) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 7) {
                 if let platform {
                     PlatformBadge(platform: platform, size: 16)
                 }
                 Text(title)
-                    .font(.scaled(.subheadline, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .font(.scaled(.subheadline))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -184,6 +202,12 @@ struct UsageView: View {
         .padding(.vertical, 7)
     }
 
+    private func periodTitle(_ start: Date, hourly: Bool) -> String {
+        hourly
+            ? start.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+            : start.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated))
+    }
+
     private var skeleton: some View {
         VStack(spacing: 10) {
             ForEach([56, 200, 120], id: \.self) { height in
@@ -193,11 +217,6 @@ struct UsageView: View {
                     .shimmering(cornerRadius: 12)
             }
         }
-    }
-
-    private func ownerKey(rowID: String, platform: PlatformKind) -> UsageOwnerKey {
-        let owner = String(rowID.dropFirst(platform.rawValue.count + 1))
-        return UsageOwnerKey(platform: platform, owner: owner.isEmpty ? nil : owner)
     }
 
     /// 依語系縮寫：中文為「1.52億」，英文為「152M」。

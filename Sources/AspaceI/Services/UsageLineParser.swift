@@ -27,14 +27,6 @@ enum UsageLineParser {
         return UsageEntry(key: hash(identity), time: time, model: model, tokens: tokens)
     }
 
-    /// 第一個出現的帳號編號（`ownerAccountUuid`／`accountUuid`），只有部分紀錄類型會帶。
-    static func claudeAccountUUID(line: Data) -> String? {
-        guard let root = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else { return nil }
-        let value = (root["ownerAccountUuid"] as? String) ?? (root["accountUuid"] as? String)
-        guard let value, UUID(uuidString: value) != nil else { return nil }
-        return value.lowercased()
-    }
-
     /// Codex 對話檔要依序讀：模型寫在 `turn_context`，用量是累計值與本輪值並列的 `token_count` 事件。
     struct CodexState: Equatable, Sendable, Codable {
         var model: String?

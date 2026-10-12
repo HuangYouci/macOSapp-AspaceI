@@ -17,18 +17,18 @@ final class UsageManager {
     @ObservationIgnored private var scanQueued = false
     private let service = UsageScanService.shared
 
-    /// 對話的帳號只能趁它還在桌面 App 的清單裡記下來，所以 popup 沒打開也要定時掃。
-    func startAutomaticRefresh(accounts: AccountManager, instances: InstanceManager) {
+    /// 使用者會定期刪對話紀錄，要趁檔案還在時讀進用量歷史，所以 popup 沒打開也要定時掃。
+    func startAutomaticRefresh(instances: InstanceManager) {
         guard refreshTask == nil else { return }
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refresh(accounts: accounts, instances: instances)
+                await self?.refresh(instances: instances)
                 try? await Task.sleep(for: Self.refreshInterval)
             }
         }
     }
 
-    func refresh(accounts: AccountManager, instances: InstanceManager) async {
+    func refresh(instances: InstanceManager) async {
         guard !isScanning else {
             scanQueued = true
             return
@@ -38,7 +38,7 @@ final class UsageManager {
         repeat {
             scanQueued = false
             do {
-                records = try await service.scan(Self.context(accounts: accounts, instances: instances))
+                records = try await service.scan(Self.context(instances: instances))
                 scannedAt = Date()
                 errorMessage = nil
             } catch is CancellationError {
@@ -51,18 +51,14 @@ final class UsageManager {
     }
 
     /// 所有 Claude 桌面實例共用 `~/.claude`；Codex 實例以 `CODEX_HOME` 指到各自的資料夾。
-    private static func context(accounts: AccountManager, instances: InstanceManager) throws -> UsageScanContext {
+    private static func context(instances: InstanceManager) throws -> UsageScanContext {
         let manager = FileManager.default
         let home = manager.homeDirectoryForCurrentUser
         let support = try manager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let claudeInstances = instances.instances.filter { $0.platform == .claude }
-        let codexInstances = instances.instances.filter { $0.platform == .codex }
         return UsageScanContext(
             claudeProjectRoots: [home.appending(path: ".claude/projects"), home.appending(path: ".config/claude/projects")],
-            claudeSessionIndexRoots: [support.appending(path: "Claude/claude-code-sessions")]
-                + claudeInstances.map { URL(fileURLWithPath: $0.profileDirectory).appending(path: "claude-code-sessions") },
-            codexHomes: [.init(url: home.appending(path: ".codex"), accountID: accounts.defaultClientAccount(for: .codex)?.id)]
-                + codexInstances.map { .init(url: URL(fileURLWithPath: $0.profileDirectory), accountID: $0.accountID) },
+            codexHomes: [home.appending(path: ".codex")]
+                + instances.instances.filter { $0.platform == .codex }.map { URL(fileURLWithPath: $0.profileDirectory) },
             storeDirectory: support.appending(path: "AspaceI", directoryHint: .isDirectory)
         )
     }

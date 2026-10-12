@@ -78,7 +78,7 @@ struct UsageScanTests {
         #expect(offset == 26)
     }
 
-    @Test("掃描、續讀、跨檔去重、歸屬與時區分日")
+    @Test("掃描、續讀、跨檔去重與時區分小時")
     func scansAndAggregates() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -90,23 +90,19 @@ struct UsageScanTests {
         // s1 的訊息 1 在 s2 又被抄了一次（且較完整），只算一次、取較多的那筆。
         try (claudeLine("1", "2026-10-11T15:30:00Z", output: 5) + claudeLine("2", "2026-10-11T16:30:00Z", output: 7)).write(to: projects.appending(path: "s1.jsonl"), atomically: true, encoding: .utf8)
         try claudeLine("1", "2026-10-11T15:30:00Z", output: 9).write(to: projects.appending(path: "s2.jsonl"), atomically: true, encoding: .utf8)
-        let index = root.appending(path: "index/11111111-1111-1111-1111-111111111111/org")
-        try FileManager.default.createDirectory(at: index, withIntermediateDirectories: true)
-        try #"{"cliSessionId":"s1"}"#.write(to: index.appending(path: "local_a.json"), atomically: true, encoding: .utf8)
-
         let context = UsageScanContext(
             claudeProjectRoots: [root.appending(path: "projects")],
-            claudeSessionIndexRoots: [root.appending(path: "index")],
             codexHomes: [],
             storeDirectory: root.appending(path: "store"),
             timeZone: try #require(TimeZone(identifier: "Asia/Taipei"))
         )
         let records = try await UsageScanService().scan(context)
-        let owner = "11111111-1111-1111-1111-111111111111"
-        // 台北時間：15:30Z = 10/11 23:30、16:30Z = 10/12 00:30。
+        // 台北時間：15:30Z = 10/11 23:00 那一小時、16:30Z = 10/12 00:00 那一小時。
         #expect(records.count == 2)
         #expect(records.map(\.tokens.output).sorted() == [7, 9])
-        #expect(Set(records.map(\.owner)) == [owner, owner])
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = context.timeZone
+        #expect(records.map { calendar.component(.hour, from: $0.hour) }.sorted() == [0, 23])
 
         // 續讀：同一個檔案往後寫，舊的不重算；快取重開也讀得回來。
         let handle = try FileHandle(forWritingTo: projects.appending(path: "s2.jsonl"))
@@ -115,23 +111,22 @@ struct UsageScanTests {
         try handle.close()
         let again = try await UsageScanService().scan(context)
         #expect(again.reduce(0) { $0 + $1.tokens.output } == 17)
-        // s2 不在桌面 App 的清單裡，訊息 3 無法歸屬。
-        #expect(again.contains { $0.owner == nil && $0.tokens.output == 1 })
+
+        // 記錄檔刪掉之後，用量仍留在 AspaceI 自己的歷史裡。
+        try FileManager.default.removeItem(at: projects)
+        let kept = try await UsageScanService().scan(context)
+        #expect(kept.reduce(0) { $0 + $1.tokens.output } == 17)
     }
 
-    @Test("Codex：還在寫的對話記給目前登入的帳號，舊對話不猜")
-    func recordsCodexOwners() {
-        let home = URL(fileURLWithPath: "/tmp/codex-home")
-        let account = UUID()
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        let context = UsageScanContext(claudeProjectRoots: [], claudeSessionIndexRoots: [], codexHomes: [.init(url: home, accountID: account)], storeDirectory: home, now: now)
-        let files = [
-            UsageScanService.DiscoveredFile(url: home.appending(path: "sessions/live.jsonl"), platform: .codex, session: "live", size: 1, modified: now.timeIntervalSince1970 - 60),
-            UsageScanService.DiscoveredFile(url: home.appending(path: "sessions/old.jsonl"), platform: .codex, session: "old", size: 1, modified: now.timeIntervalSince1970 - 86_400)
-        ]
-        var owners = UsageOwners(codex: ["kept": "x"])
-        UsageScanService.recordCodexOwners(&owners, files: files, context: context)
-        #expect(owners.codex == ["kept": "x", "live": account.uuidString])
+    @Test("歷史檔讀不出來時改名保留，不覆寫")
+    func keepsUnreadableHistory() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("壞掉的內容".utf8).write(to: directory.appending(path: UsageScanService.historyFileName))
+        #expect(try UsageScanService.loadHistory(in: directory) == UsageHistory())
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(names.count == 1)
+        #expect(names.first?.hasPrefix("\(UsageScanService.historyFileName).unreadable-") == true)
     }
 
     @Test("子代理的紀錄歸到父對話")
@@ -148,29 +143,33 @@ struct UsageSummaryTests {
         return calendar
     }
 
-    @Test("區間補滿沒有用量的日子，篩選只影響每日與模型")
-    func summarizes() {
-        let today = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_791_788_308))
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
-        let old = calendar.date(byAdding: .day, value: -40, to: today) ?? today
-        let account = Account(platform: .claude, displayName: "claude-max-1", accountUUID: "aaaa")
+    @Test("今日以小時分段，其他區間以日分段並補滿沒有用量的時段")
+    func summarizes() throws {
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: 15, minute: 20)))
+        let today = calendar.startOfDay(for: now)
+        func hour(_ day: Int, _ hour: Int) -> Date {
+            calendar.date(byAdding: DateComponents(day: day, hour: hour), to: today) ?? today
+        }
         let records = [
-            UsageRecord(day: today, platform: .claude, model: "opus", owner: "aaaa", tokens: TokenCounts(output: 10)),
-            UsageRecord(day: yesterday, platform: .claude, model: "sonnet", owner: nil, tokens: TokenCounts(output: 3)),
-            UsageRecord(day: old, platform: .codex, model: "gpt", owner: nil, tokens: TokenCounts(output: 100))
+            UsageRecord(hour: hour(0, 9), platform: .claude, model: "opus", tokens: TokenCounts(output: 10)),
+            UsageRecord(hour: hour(0, 14), platform: .claude, model: "opus", tokens: TokenCounts(output: 5)),
+            UsageRecord(hour: hour(-1, 23), platform: .claude, model: "sonnet", tokens: TokenCounts(output: 3)),
+            UsageRecord(hour: hour(-40, 1), platform: .codex, model: "gpt", tokens: TokenCounts(output: 100))
         ]
-        let week = UsageSummary(records: records, range: .week, filter: nil, accounts: [account], today: today, calendar: calendar)
-        #expect(week.days.count == 7)
-        #expect(week.total.output == 13)
-        #expect(week.models.map(\.title) == ["opus", "sonnet"])
-        #expect(week.owners.map(\.title) == ["claude-max-1", "未歸屬"])
+        let todaySummary = UsageSummary(records: records, range: .today, now: now, calendar: calendar)
+        #expect(todaySummary.isHourly)
+        #expect(todaySummary.periods.count == 16)
+        #expect(todaySummary.total.output == 15)
+        #expect(todaySummary.periods[9].tokens.output == 10)
 
-        let filtered = UsageSummary(records: records, range: .week, filter: UsageOwnerKey(platform: .claude, owner: "aaaa"), accounts: [account], today: today, calendar: calendar)
-        #expect(filtered.total.output == 10)
-        #expect(filtered.owners.count == 2)
+        let week = UsageSummary(records: records, range: .week, now: now, calendar: calendar)
+        #expect(week.periods.count == 7)
+        #expect(week.periods.last?.tokens.output == 15)
+        #expect(week.total.output == 18)
+        #expect(week.models.map(\.name) == ["opus", "sonnet"])
 
-        let all = UsageSummary(records: records, range: .all, filter: nil, accounts: [account], today: today, calendar: calendar)
-        #expect(all.days.count == 41)
-        #expect(all.total.output == 113)
+        let all = UsageSummary(records: records, range: .all, now: now, calendar: calendar)
+        #expect(all.periods.count == 41)
+        #expect(all.total.output == 118)
     }
 }
