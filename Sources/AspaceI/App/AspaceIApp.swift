@@ -35,7 +35,11 @@ struct AspaceIApp: App {
                 .environment(settingsManager)
                 .environment(loginManager)
         } label: {
-            MenuBarLabel(items: MenuBarQuotaItem.items(accounts: accountManager.accounts, selectedIDs: settingsManager.menuBarAccountIDs))
+            MenuBarLabel(items: MenuBarQuotaItem.items(
+                accounts: accountManager.accounts,
+                selectedIDs: settingsManager.menuBarAccountIDs,
+                mode: settingsManager.menuBarQuotaMode
+            ))
                 .task {
                     instanceManager.startMonitoring(accounts: accountManager)
                     await accountManager.autoImportLocalAccounts()

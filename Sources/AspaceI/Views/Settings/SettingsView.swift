@@ -31,7 +31,23 @@ struct SettingsView: View {
                 }
             }
 
-            section("Menu bar", trailing: "\(settingsManager.menuBarAccountIDs.count)/\(MenuBarQuotaItem.limit)") {
+            section("Menu bar", trailing: "\(settingsManager.menuBarAccountIDs.count)") {
+                row {
+                    Text("額度")
+                    Spacer()
+                    Picker("額度", selection: Binding(
+                        get: { settingsManager.menuBarQuotaMode },
+                        set: { settingsManager.setMenuBarQuotaMode($0) }
+                    )) {
+                        ForEach(MenuBarQuotaMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                rowDivider
                 if accountManager.accounts.isEmpty {
                     row {
                         Text("尚未加入帳號")
@@ -83,7 +99,7 @@ struct SettingsView: View {
                 row {
                     Text("版本")
                     Spacer()
-                    Text("26.9.13")
+                    Text("26.10.12")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
@@ -134,7 +150,6 @@ struct SettingsView: View {
 
     private func menuBarRow(_ account: Account) -> some View {
         let shown = settingsManager.isShownInMenuBar(account.id)
-        let enabled = shown || settingsManager.canAddMenuBarAccount
         return Button {
             settingsManager.setMenuBar(account.id, shown: !shown)
         } label: {
@@ -155,8 +170,6 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.45)
     }
 
     private func linkRow(_ title: String, url: URL) -> some View {

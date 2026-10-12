@@ -6,9 +6,11 @@ import ServiceManagement
 @Observable
 final class SettingsManager {
     private static let menuBarAccountsKey = "menuBarAccountIDs"
+    private static let menuBarQuotaModeKey = "menuBarQuotaMode"
 
     private(set) var launchAtLogin = false
     private(set) var menuBarAccountIDs: [UUID] = []
+    private(set) var menuBarQuotaMode: MenuBarQuotaMode = .defaultValue
     var errorMessage: String?
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -16,6 +18,7 @@ final class SettingsManager {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         menuBarAccountIDs = (defaults.stringArray(forKey: Self.menuBarAccountsKey) ?? []).compactMap(UUID.init(uuidString:))
+        menuBarQuotaMode = defaults.string(forKey: Self.menuBarQuotaModeKey).flatMap(MenuBarQuotaMode.init(rawValue:)) ?? .defaultValue
         refreshLaunchAtLoginStatus()
     }
 
@@ -42,17 +45,18 @@ final class SettingsManager {
         menuBarAccountIDs.contains(accountID)
     }
 
-    var canAddMenuBarAccount: Bool {
-        menuBarAccountIDs.count < MenuBarQuotaItem.limit
-    }
-
     func setMenuBar(_ accountID: UUID, shown: Bool) {
         if shown {
-            guard !menuBarAccountIDs.contains(accountID), canAddMenuBarAccount else { return }
+            guard !menuBarAccountIDs.contains(accountID) else { return }
             menuBarAccountIDs.append(accountID)
         } else {
             menuBarAccountIDs.removeAll { $0 == accountID }
         }
         defaults.set(menuBarAccountIDs.map(\.uuidString), forKey: Self.menuBarAccountsKey)
+    }
+
+    func setMenuBarQuotaMode(_ mode: MenuBarQuotaMode) {
+        menuBarQuotaMode = mode
+        defaults.set(mode.rawValue, forKey: Self.menuBarQuotaModeKey)
     }
 }
