@@ -56,7 +56,7 @@ struct MenuBarQuotaItem: Equatable, Identifiable, Sendable {
         }
     }
 
-    /// 帳號沒有所選的任何時窗時（例如 Copilot 只有月、選了段），退回顯示剩餘最少的那格，不讓整段只剩 --。
+    /// 帳號沒有所選的任何時窗時（例如 Codex 免費方案只有月、選了段），退回顯示剩餘最少的那格，不讓整段只剩 --。
     static func percentages(for account: Account, mode: MenuBarQuotaMode) -> [String] {
         let windows = account.quota?.primaryWindows ?? []
         guard !windows.isEmpty else { return ["--"] }

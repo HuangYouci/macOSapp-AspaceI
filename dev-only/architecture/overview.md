@@ -2,7 +2,11 @@
 
 最後更新日期：2026-10-12
 
-對應功能／commit：menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：移除 GitHub Copilot；用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+
+## 移除 GitHub Copilot（2026-10-12 決策）
+
+負責人判斷 Copilot 不值得維護，連同 GitHub 裝置碼登入、`gh auth token` 匯入、`copilot_internal` 額度、VS Code 實例一起移除。舊資料：`accounts.json` 與 `instances.json` 改為逐筆讀，平台解不出來的略過（`AccountStore.decode`、`StoredInstance`），GitHub 帳號在 Keychain 裡的 token 於載入時刪除；VS Code 實例的資料夾與複本留在原處不動。下文提到 VS Code 的實測（IPC socket 路徑長度、引號排除、quarantine）是當時的紀錄，規則仍適用於其他 Electron App。
 
 ## 邊界
 
@@ -23,7 +27,6 @@ AspaceI 採本機優先架構。畫面只呈現注入的帳號及額度狀態，
 | Codex | `chatgpt.com/backend-api/wham/usage` | `primary_window`／`secondary_window` 依 `limit_window_seconds` 判定；Pro 等方案可能只有 7d |
 | Claude | `api.anthropic.com/api/oauth/usage` | `five_hour`、`seven_day` |
 | Antigravity | `<host>/v1internal:retrieveUserQuotaSummary`，host 見下 | 只取 Gemini 群組的 5h／7d；Claude/GPT 群組不提供；`disabled` 時窗略過。找不到 Gemini 群組就整筆丟棄，不退回第一個群組（否則會把 `3p-*` 的數字掛到 Gemini 欄位）。週限額用完時 5h 桶會回週的重置時間與被壓住的比例，此時視為 5h 未使用：顯示 100% 且不顯示倒數。判定沿用 cockpit-tools `getAntigravityQuotaDisplayItems`，但多要求 5h 的重置時間不早於週的——沒用過的 5h 視窗本來就回「現在 + 5 小時」，單看「距今超過五小時」會在邊界誤判而抹掉還在走的倒數（2026-09-18 實測：5h 重置 5.08 小時後、週重置 6.2 小時後，兩個都還沒被壓住） |
-| GitHub Copilot | `api.github.com/copilot_internal/user` | 每月重置；有 premium 額度時取 `premium_interactions`，免費方案退回 `chat` |
 
 #### Antigravity 的後端有兩個
 
@@ -42,7 +45,7 @@ tier id 存在 `Account.tierID`，每輪從 `loadCodeAssist` 更新——它同�
 ### Token 保活
 
 - 本機匯入的帳號：每輪先從官方客戶端的檔案重新讀取憑證（只讀檔案），內容變了才寫回 Keychain；由官方客戶端負責換新。寫回前先確認檔案屬於該帳號（`AccountManager.localFile`）：能從 id_token 取得身分就比對身分，取不到就比對 refresh token（Google 的不輪替），兩者都判斷不出來時只信任 `origin == .local` 的帳號。少了這道判斷，使用者在官方 App 裡換回別的帳號後，AspaceI 會把官方 App 的憑證蓋到切換進來的帳號上，畫面看起來就像「切換沒有生效」。
-- AspaceI 自己登入或從檔案匯入的帳號：Claude 在 `expiresAt` 前一分鐘換新；Codex 在 `last_refresh` 超過 7 天（或沒有紀錄）時換新；兩者遇到 401/403 也會換新重試。Antigravity 每次都用 refresh token 換 access token；GitHub device flow token 不會過期。
+- AspaceI 自己登入或從檔案匯入的帳號：Claude 在 `expiresAt` 前一分鐘換新；Codex 在 `last_refresh` 超過 7 天（或沒有紀錄）時換新；兩者遇到 401/403 也會換新重試。Antigravity 每次都用 refresh token 換 access token。
 - 只在 App 執行時運作，需要常駐請開「登入時開啟」。
 
 ### 方案
@@ -52,7 +55,6 @@ tier id 存在 `Account.tierID`，每輪從 `loadCodeAssist` 更新——它同�
 | Codex | usage 回應的 `plan_type`；`prolite` 為 Pro 5x，`promax` 或單純 `pro` 視為 Pro 20x（沿用 cockpit-tools 判定，API 目前不區分） |
 | Claude | `api/oauth/profile` 的 `organization.rate_limit_tier`（Max 5x/20x）或 `organization_type` |
 | Antigravity | `loadCodeAssist` 的 `paidTier.id`，沒有才看 `currentTier.id` |
-| GitHub Copilot | `copilot_internal/user` 的 `access_type_sku` 與 `copilot_plan` |
 
 Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案時查一次。額度表以灰色膠囊顯示方案；目前帳號以粗體呈現，其餘帳號為次要色。
 
@@ -60,11 +62,11 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 
 - App 採 accessory activation policy，不顯示 Dock 圖示。
 - App 只有 menu bar popup，不建立一般主視窗或漂浮視窗。
-- Popup 分為額度、實例、設定三個分頁；帳號管理併入額度分頁，以單列卡片呈現並由列尾選單切換帳號。
-- Popup 固定 456 × 640，各分頁內容自行捲動。曾嘗試高度隨內容並錨定左上角，但 MenuBarExtra 視窗縮放時仍會跳動，因此改為固定尺寸（2026-09-13 決策）。加入帳號與新增實例在 popup 內切換畫面，不使用 sheet。
+- Popup 分為額度、用量、實例、設定四個分頁（用量的資料流與規則見 `dev-only/usage-stats/overview.md`）；帳號管理併入額度分頁，以單列卡片呈現並由列尾選單切換帳號。
+- Popup 固定 456 × 640，每一頁各自一個捲動區（切頁從頂端開始）。捲動區貼齊 popup 四邊，14pt 留白放在捲動內容裡，邊緣也捲得到；分頁列與錯誤訊息以 `popupBar`（`safeAreaBar`）固定在上下緣，內容捲進列底下時由系統柔和邊緣模糊淡出。2026-10-12 實測：SwiftUI `Material` 與 `NSVisualEffectView(.withinWindow)` 都模糊不到捲動內容，只會疊一層白，所以不自己畫；macOS 26 以前沒有柔和邊緣，退回捲動區接在列的邊界。曾嘗試高度隨內容並錨定左上角，但 MenuBarExtra 視窗縮放時仍會跳動，因此改為固定尺寸（2026-09-13 決策）。加入帳號與新增實例在 popup 內切換畫面，不使用 sheet。
 - 字級：macOS 不支援 Dynamic Type，popup 內一律使用 `Font.scaled(_:)`，以系統文字樣式基準放大 1.2 倍；根視圖設定 `.scaled(.body)` 讓控制項文字一併放大。
 - MenuBarExtra 視窗不吃 `preferredColorScheme`，以 `PopupWindowConfigurator` 直接設定 NSWindow 為 aqua。
-- Menu bar 顯示使用者在設定勾選的帳號（不設上限，越多越長），格式為「平台單色標誌 短名稱 百分比」，以 `|` 分隔；百分比依設定的額度類型（`MenuBarQuotaMode`：段、週、月、段+週、最少，預設段+週）取時窗，帳號沒有所選的任何時窗時（例如 Copilot 只有月）退回剩餘最少的那格，沒有額度顯示 `--`；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
+- Menu bar 顯示使用者在設定勾選的帳號（不設上限，越多越長），格式為「平台單色標誌 短名稱 百分比」，以 `|` 分隔；百分比依設定的額度類型（`MenuBarQuotaMode`：段、週、月、段+週、最少，預設段+週）取時窗，帳號沒有所選的任何時窗時（例如 Codex 免費方案只有月）退回剩餘最少的那格，沒有額度顯示 `--`；多段內容以 `ImageRenderer` 畫成單張 template 圖交給系統上色。未勾選時只顯示 App 單色圖示。帳號名稱取 email／login 的使用者名稱。
 - 短名稱（`ShortLabel`，menu bar 與實例 Dock 圖示共用）：取前三字；任兩個前三字相同時保留前兩字、第三字改取各自第一個不同的字（三個以上就先分出獨一的，同組的再往後比；比到某個名稱結束時它保留原本前三字）；比到最後仍相同就第三位改用 1、2、3…（依帳號順序）。比較範圍是**所有帳號**而非只有勾選的，同一個帳號在 menu bar 與 Dock 才會是同一個短名稱。
 - App Icon 原始檔為 `Support/AppIcon.icon`（Icon Composer 格式），`build-app.sh` 以 `actool` 編譯為 `Assets.car` 與 `AppIcon.icns`；menu bar 圖示與平台單色標誌為 `Resources/Logos/*-glyph.png`。
 - 額度頁（`QuotaTableView`）每個平台一張卡片，卡片標題列同時是欄名（段／週／月），三欄在所有卡片對齊以便比較；沒有該時窗顯示「–」。只顯示百分比，不用顏色區分高低。底部顯示最近一次更新時間。
@@ -86,7 +88,6 @@ Claude 與 Antigravity 的方案需要額外請求，只在帳號還沒有方案
 | Codex | PKCE authorization code | `OAuthCallbackServer` 聽 `localhost:1455/auth/callback`（官方註冊的固定埠，官方客戶端登入中會衝突） |
 | Antigravity | PKCE + client secret，`access_type=offline` | `localhost:51121/oauth-callback` |
 | Claude | PKCE，官方手動回呼頁 | 使用者把頁面上的 `code#state` 貼回 App |
-| GitHub Copilot | Device flow（Copilot GitHub App client） | 輪詢；使用者碼自動複製並開啟驗證頁 |
 
 OAuth 取得的憑證寫成各官方客戶端的原生格式（Codex `auth.json`、Claude Code `.credentials.json`、Antigravity `jetski-standalone-oauth-token`），因此可直接投影到實例或官方客戶端。Antigravity 另外保留回應中的 `id_token`，它同時是官方檔案的登入身分與 AspaceI 判斷憑證屬於誰的依據。同平台同 email 的帳號視為同一人，重新登入時覆寫憑證；本機匯入的帳號也算在內，合併時保留 `origin == .local`（換新仍由官方客戶端負責）。先前排除 `.local` 會讓同一個 Google 帳號變成兩列、額度數字一模一樣，互相切換看起來沒作用。
 
@@ -96,20 +97,19 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
 
 ### 匯入／匯出
 
-設定頁「帳號備份」匯出全部帳號為 `aspacei.accounts` v1 JSON（含完整憑證，檔案權限 0600，匯出前確認）。匯入同時接受此格式與其他工具（例如 cockpit-tools）的帳號陣列，依欄位形狀判斷平台：`tokens` → Codex、`claudeAiOauth` → Claude、`github_access_token`／`gh*` token → GitHub、`refresh_token` → Antigravity。加入帳號畫面的「匯入檔案」先嘗試帳號檔，失敗再當成所選平台的單一憑證。
+設定頁「帳號備份」匯出全部帳號為 `aspacei.accounts` v1 JSON（含完整憑證，檔案權限 0600，匯出前確認）。匯入同時接受此格式與其他工具（例如 cockpit-tools）的帳號陣列，依欄位形狀判斷平台：`tokens` → Codex、`claudeAiOauth` → Claude、`refresh_token` → Antigravity。加入帳號畫面的「匯入檔案」先嘗試帳號檔，失敗再當成所選平台的單一憑證。
 
 ## 機密資料
 
 - Token 與 refresh token 只存入 macOS Keychain，而且集中成單一項目（service `com.huangyouci.AspaceI`、account `credentials-vault`，內容為 reference → 憑證的 JSON），啟動後讀一次並快取在記憶體。macOS 對每個項目各自要求授權，分散存放時帳號越多跳越多次。舊版每帳號一個項目的資料在第一次讀到時併入並刪除。
 - `build-app.sh` 優先使用本機的 Apple Development／Developer ID 簽章。Keychain 依簽章判斷是否為同一個 App；ad-hoc 簽章每次建置都會變，導致「永遠允許」失效而反覆詢問。
-- 啟動時的自動匯入只讀檔案（`~/.codex/auth.json`、`~/.claude/.credentials.json`、`gh auth token`），不讀其他 App 的 Keychain 項目；那些只在使用者按「本機偵測」時讀取。Antigravity 的 `gemini`／`antigravity` 項目是例外，它就是官方 App 現行的登入位置，而且讀取不跳授權視窗，等同於讀檔案。
+- 啟動時的自動匯入只讀檔案（`~/.codex/auth.json`、`~/.claude/.credentials.json`），不讀其他 App 的 Keychain 項目；那些只在使用者按「本機偵測」時讀取。Antigravity 的 `gemini`／`antigravity` 項目是例外，它就是官方 App 現行的登入位置，而且讀取不跳授權視窗，等同於讀檔案。
 - 一般 JSON 僅保存帳號識別資訊、平台、方案、額度快取及重置時間。
 - Log 不得包含 token、Authorization header、Cookie 或原始登入檔案內容。
-- GitHub 使用官方 `gh auth token` 從系統 Keychain 取值，轉存時只寫入 AspaceI Keychain；啟動綁定 Instance 時以環境變數注入。
 
 ## 多 Instance
 
-實例一律是桌面 App，依服務分組：VS Code（GitHub Copilot）、Antigravity、Claude、Codex。App 由 `ExecutableLocatorService` 在 `/Applications` 與 `~/Applications` 尋找；未安裝時整組停用。
+實例一律是桌面 App，依服務分組：Antigravity、Claude、Codex。App 由 `ExecutableLocatorService` 在 `/Applications` 與 `~/Applications` 尋找；未安裝時整組停用。
 
 - 每組第一個是「預設」實例：不存檔、不可刪除，id 依平台固定。以 `open -n -a` 開啟系統原本的 App 設定。`-n` 不能省：同一個 App 已有其他實例在跑時，沒有 `-n` 的 `open` 只會把其中一個（不一定是哪個）叫到前面，預設實例根本沒開（2026-10-09 使用者回報「再開啟不一定是我要的 Instance」）。啟動只在實例沒有執行時發生；萬一狀態過期多開了一個，Electron 的單一實例鎖會讓它把焦點交給原本那個後自行結束。
 - 其他實例以 `open -n -a <複本> --args --user-data-dir=<資料夾>` 開新程序（2026-09-14 四平台實測；複本見下方「非預設實例的 App 名稱與圖示」）：
@@ -118,8 +118,9 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
   - Claude 正式版會刪掉 `CLAUDE_USER_DATA_DIR`，不再傳。
   - 實例資料夾名稱取 UUID 前 8 碼：VS Code 在資料夾內建立 IPC socket，完整 UUID 會超過 macOS 104 字元的 socket 路徑上限而啟動即結束。舊實例沿用已存的路徑。
   - `open` 會把呼叫端的環境變數轉交給 App，啟動時濾掉 `DYLD_*`。
+- `ps` 一律在背景執行（`InstanceManager.processList`），`refreshRunning`／`refreshCloneIcons` 為 async：程序多的機器上 `ps -axww` 要 0.5 到 3.5 秒（2026-10-12 實測 4800 個程序），原本在主執行緒同步跑，切到實例分頁整個 popup 會卡住。同一時間只跑一輪，期間再被呼叫就排到這輪之後；啟動時先抓一輪，第一次打開實例分頁狀態就是對的。
 - 執行狀態以 `ps` 比對主執行檔：`.app/Contents/MacOS/` 之前的路徑不能再有 `/Contents/`（排除 Frameworks 裡的 Helper）也不能有引號（排除 VS Code 讀 shell 環境的 `/bin/zsh -c '…/Code'`）。預設實例是原本 App 名稱（只比對名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行）、沒有 `--user-data-dir`、不在複本資料夾的那個；其他實例不看 App 名稱（複本檔名會變），只比對資料夾（等號與空格兩種寫法都認）。停止送 SIGTERM。
-- 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 與 VS Code 的登入存在各自加密的儲存區，不提供綁定，實例內自行登入一次。
+- 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 的登入存在加密的儲存區，不提供綁定，實例內自行登入一次。
 - Claude 實例（含預設）改為**自動辨識**目前登入的帳號，列上只顯示、不提供選單：讀該實例資料夾 `config.json` 的 `lastKnownAccountUuid`，同時要有非空的 `oauth:tokenCache*` 才算登入中（`lastKnown` 登出後可能殘留，這一點未實測登出行為），再對到 `Account.accountUUID`（Claude `api/oauth/profile` 的 `account.uuid`，帳號沒有時每輪補抓）。2026-10-08 實測兩者同一套編號：`~/.claude.json` 的 `oauthAccount.accountUuid` 與預設 Claude 相同，兩個實例都對到正確帳號。不能做成像 Codex 的選單：AspaceI 手上是 Claude Code 的 OAuth token，桌面 App 的登入是 claude.ai cookie 與 safeStorage 加密的 token 快取，寫不進去。登入狀態在打開實例分頁與按更新時重讀。
 - Claude 實例（含預設）不放自己的 menu bar 圖示：每個實例各放一個，多開時擠滿 menu bar。啟動前把該實例 `claude_desktop_config.json` 的 `preferences.menuBarEnabled` 設為 false（Claude 設定頁的同一個開關，關掉時 App 不建立 `Tray`），其他欄位原樣保留，格式不對就不寫、照常啟動。只能在實例沒執行時寫：Claude 啟動時把設定讀進記憶體，之後以記憶體的版本整份寫回，執行中改檔案會被蓋掉。所以已在執行的實例要經 AspaceI 重開一次才生效；預設實例被 ShipIt 或 Dock 直接打開時沿用檔案裡已寫入的值。2026-10-10 實測：AspaceI 開啟的測試實例沒有 status item，Claude 啟動與結束寫回後值仍為 false。
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。

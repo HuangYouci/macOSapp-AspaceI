@@ -6,12 +6,6 @@ import Testing
 struct ExecutableLocatorServiceTests {
     private let home = URL(fileURLWithPath: "/Users/tester")
 
-    @Test("GitHub Copilot 實例使用 VS Code")
-    func copilotUsesVSCode() {
-        let paths = ExecutableLocatorService.candidatePaths(for: .githubCopilot, homeDirectory: home)
-        #expect(paths.first == "/Applications/Visual Studio Code.app")
-    }
-
     @Test("Antigravity 優先新版 App，其次 IDE，並找使用者 Applications")
     func antigravityCandidates() {
         let located = ExecutableLocatorService.shared.locate(.antigravity, homeDirectory: home, bundleLookup: { _ in nil }) {

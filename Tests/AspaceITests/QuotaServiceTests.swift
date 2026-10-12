@@ -41,35 +41,6 @@ struct QuotaServiceTests {
         #expect(result.windows.allSatisfy { $0.resetsAt != nil })
     }
 
-    @Test("Copilot 付費方案取 premium requests")
-    func parsesCopilotPremiumInteractions() throws {
-        let result = try QuotaService.parseCopilotQuota([
-            "login": "octocat",
-            "quota_reset_date_utc": "2026-10-01T00:00:00.000Z",
-            "quota_snapshots": [
-                "chat": ["percent_remaining": 100.0, "entitlement": 0, "unlimited": true],
-                "premium_interactions": ["percent_remaining": 62.4, "entitlement": 300, "unlimited": false]
-            ]
-        ])
-        #expect(result.windows.first?.id == "premium")
-        #expect(result.windows.first?.remainingPercentage == 62)
-        #expect(result.windows.first?.kind == .month)
-        #expect(result.windows.first?.resetsAt != nil)
-        #expect(result.identity == "octocat")
-    }
-
-    @Test("Copilot 免費方案沒有 premium 額度時退回 chat")
-    func fallsBackToCopilotChatOnFreePlan() throws {
-        let result = try QuotaService.parseCopilotQuota([
-            "quota_snapshots": [
-                "chat": ["percent_remaining": 85.0, "entitlement": 200, "unlimited": false],
-                "premium_interactions": ["percent_remaining": 0.0, "entitlement": 0, "unlimited": false]
-            ]
-        ])
-        #expect(result.windows.first?.id == "chat")
-        #expect(result.windows.first?.remainingPercentage == 85)
-    }
-
     @Test("Antigravity 只取 Gemini 群組的額度")
     func parsesAntigravityQuotaGroups() throws {
         let result = try QuotaService.parseAntigravityQuota([
@@ -216,13 +187,6 @@ struct PlanParsingTests {
     func antigravity() {
         #expect(QuotaService.parseAntigravityPlan(["currentTier": ["id": "free-tier"], "paidTier": ["id": "g1-ultra-tier"]]) == "Ultra")
         #expect(QuotaService.parseAntigravityPlan(["currentTier": ["id": "free-tier"]]) == "Free")
-    }
-
-    @Test("Copilot 依 sku 與 copilot_plan")
-    func copilot() {
-        #expect(QuotaService.parseCopilotPlan(["access_type_sku": "free_limited_copilot", "copilot_plan": "individual"]) == "Free")
-        #expect(QuotaService.parseCopilotPlan(["access_type_sku": "copilot_pro_plus", "copilot_plan": "individual"]) == "Pro+")
-        #expect(QuotaService.parseCopilotPlan(["copilot_plan": "business"]) == "Business")
     }
 
     @Test("Codex 超過 7 天或沒有換新紀錄時提早換 token")

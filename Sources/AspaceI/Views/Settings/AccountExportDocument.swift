@@ -1,8 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// 匯出用的單一檔案；帳號備份（JSON，含憑證）與用量（CSV）共用。
 struct AccountExportDocument: FileDocument {
-    static let readableContentTypes: [UTType] = [.json]
+    static let readableContentTypes: [UTType] = [.json, .commaSeparatedText]
 
     let data: Data
 

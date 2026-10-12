@@ -106,15 +106,6 @@ struct AccountEditorView: View {
                 Button("完成", action: submitCode)
                     .disabled(login.pastedCode.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-        case .deviceCode(let userCode, _):
-            HStack {
-                Text(userCode)
-                    .font(.scaled(.title3, weight: .semibold, design: .monospaced))
-                    .textSelection(.enabled)
-                Spacer()
-                Button("複製並開啟 GitHub") { login.openVerificationPage() }
-                Button("取消") { login.cancel() }
-            }
         case .failed(let message):
             Text(message)
                 .font(.scaled(.caption))

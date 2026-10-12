@@ -22,7 +22,7 @@ struct CredentialImportTests {
         let source = #"{"access_token":"example-token"}"#
         let imported = try CredentialImportService.shared.importText(
             source,
-            platform: .githubCopilot,
+            platform: .codex,
             displayName: "測試"
         )
         #expect(imported.data == Data(source.utf8))

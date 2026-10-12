@@ -9,15 +9,12 @@ struct InstanceListView: View {
     private static let menuWidth: CGFloat = 22
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                ForEach(instanceManager.groups) { group in
-                    section(group)
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(instanceManager.groups) { group in
+                section(group)
             }
-            .padding(2)
         }
-        .onAppear { instanceManager.refreshRunning() }
+        .task { await instanceManager.refreshRunning() }
     }
 
     private func section(_ group: InstanceManager.Group) -> some View {

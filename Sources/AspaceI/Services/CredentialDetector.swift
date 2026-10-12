@@ -27,15 +27,10 @@ enum CredentialDetector {
             return .unknown
         }
 
-        if trimmed.contains("oauth_token:") { return .credential(.githubCopilot) }
         let prefixes: [(String, PlatformKind)] = [
             ("sk-ant-", .claude),
             ("1//", .antigravity),
-            ("ya29.", .antigravity),
-            ("gho_", .githubCopilot),
-            ("ghu_", .githubCopilot),
-            ("ghp_", .githubCopilot),
-            ("github_pat_", .githubCopilot)
+            ("ya29.", .antigravity)
         ]
         if let match = prefixes.first(where: { trimmed.hasPrefix($0.0) }) { return .credential(match.1) }
         if trimmed.hasPrefix("eyJ"), let claims = OAuthService.jwtClaims(trimmed), claims["https://api.openai.com/auth"] != nil {

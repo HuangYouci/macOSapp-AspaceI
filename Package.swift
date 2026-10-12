@@ -16,6 +16,7 @@ let package = Package(
             name: "AspaceI",
             resources: [
                 .copy("Resources/Logos"),
+                .copy("Resources/Pricing"),
                 .process("Resources/Localization")
             ],
             linkerSettings: [

@@ -4,7 +4,7 @@ import Testing
 
 struct InstanceServiceTests {
     private let codex = Instance(name: "Codex 2", platform: .codex, profileDirectory: "/p/codex", executablePath: "/Applications/Codex.app")
-    private let vscode = Instance(name: "VS Code 2", platform: .githubCopilot, profileDirectory: "/p/vscode", executablePath: "/Applications/Visual Studio Code.app")
+    private let vscode = Instance(name: "Antigravity 2", platform: .antigravity, profileDirectory: "/p/vscode", executablePath: "/Applications/Visual Studio Code.app")
 
     @Test
     func refusesToTrashProfileOutsideManagedRoot() {
@@ -46,7 +46,7 @@ struct InstanceServiceTests {
         #expect(InstanceService.mainProcessIDs(for: vscode, isDefault: true, in: list) == [101])
         #expect(InstanceService.mainProcessIDs(for: vscode, isDefault: false, in: list) == [202])
         #expect(InstanceService.mainProcessIDs(for: codex, isDefault: false, in: list) == [404])
-        let translocated = Instance(name: "VS Code 3", platform: .githubCopilot, profileDirectory: "/p/vscode-2", executablePath: "/Applications/Visual Studio Code.app")
+        let translocated = Instance(name: "Antigravity 3", platform: .antigravity, profileDirectory: "/p/vscode-2", executablePath: "/Applications/Visual Studio Code.app")
         #expect(InstanceService.mainProcessIDs(for: translocated, isDefault: false, in: list) == [505])
     }
 

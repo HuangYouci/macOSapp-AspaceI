@@ -34,14 +34,6 @@ struct OAuthCredential: Sendable {
     let email: String?
 }
 
-struct GitHubDeviceCode: Sendable {
-    let deviceCode: String
-    let userCode: String
-    let verificationURL: URL
-    let interval: Int
-    let expiresAt: Date
-}
-
 /// 各平台官方客戶端隨 App 散佈的公開 OAuth client（installed-app，不視為機密）。
 enum OAuthClient {
     static let codexID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -68,7 +60,6 @@ enum OAuthClient {
         "https://www.googleapis.com/auth/experimentsandconfigs"
     ].joined(separator: " ")
 
-    static let githubID = "Iv1.b507a08c87ecfe98"
 }
 
 final class OAuthService: Sendable {
@@ -119,8 +110,6 @@ final class OAuthService: Sendable {
                 "state": state
             ])
             return url.map { OAuthAuthorization(platform: platform, url: $0, pkce: pkce, state: state, redirectURI: redirect, callbackPort: OAuthClient.antigravityPort, callbackPath: "/oauth-callback") }
-        case .githubCopilot:
-            return nil
         }
     }
 
@@ -161,8 +150,6 @@ final class OAuthService: Sendable {
                 credential = OAuthCredential(platform: .antigravity, data: credential.data, email: await googleEmail(accessToken: token))
             }
             return credential
-        case .githubCopilot:
-            throw OAuthError.invalidResponse
         }
     }
 
@@ -231,46 +218,6 @@ final class OAuthService: Sendable {
         if let idToken, !idToken.isEmpty { object["id_token"] = idToken }
         let email = idToken.flatMap { jwtClaims($0)?["email"] as? String }
         return OAuthCredential(platform: .antigravity, data: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), email: email)
-    }
-
-    // MARK: GitHub 裝置流程
-
-    func requestGitHubDeviceCode() async throws -> GitHubDeviceCode {
-        let value = try await postForm("https://github.com/login/device/code", [
-            "client_id": OAuthClient.githubID,
-            "scope": "read:user"
-        ])
-        guard let deviceCode = value["device_code"] as? String,
-              let userCode = value["user_code"] as? String,
-              let uri = (value["verification_uri"] as? String).flatMap(URL.init(string:)) else { throw OAuthError.invalidResponse }
-        let interval = (value["interval"] as? NSNumber)?.intValue ?? 5
-        let expiresIn = (value["expires_in"] as? NSNumber)?.doubleValue ?? 900
-        return GitHubDeviceCode(deviceCode: deviceCode, userCode: userCode, verificationURL: uri, interval: interval, expiresAt: .now.addingTimeInterval(expiresIn))
-    }
-
-    func pollGitHubToken(_ device: GitHubDeviceCode) async throws -> OAuthCredential {
-        var interval = device.interval
-        while Date.now < device.expiresAt {
-            try await Task.sleep(for: .seconds(interval))
-            try Task.checkCancellation()
-            let value = try await postForm("https://github.com/login/oauth/access_token", [
-                "client_id": OAuthClient.githubID,
-                "device_code": device.deviceCode,
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-            ], acceptsErrorBody: true)
-            if let token = value["access_token"] as? String, !token.isEmpty {
-                let data = try JSONSerialization.data(withJSONObject: ["access_token": token])
-                return OAuthCredential(platform: .githubCopilot, data: data, email: nil)
-            }
-            switch value["error"] as? String {
-            case "authorization_pending": continue
-            case "slow_down": interval += 5
-            case "access_denied": throw OAuthError.denied
-            case "expired_token": throw OAuthError.timedOut
-            default: throw OAuthError.invalidResponse
-            }
-        }
-        throw OAuthError.timedOut
     }
 
     // MARK: 更新 token

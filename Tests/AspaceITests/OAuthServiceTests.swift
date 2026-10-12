@@ -30,7 +30,6 @@ struct OAuthServiceTests {
         let items = try #require(URLComponents(url: authorization.url, resolvingAgainstBaseURL: false)?.queryItems)
         #expect(items.contains { $0.name == "access_type" && $0.value == "offline" })
         #expect(items.contains { $0.name == "prompt" && $0.value == "consent" })
-        #expect(OAuthService.authorization(for: .githubCopilot) == nil)
     }
 
     @Test("Claude 授權碼接受 code#state 與完整回呼網址")

@@ -17,6 +17,7 @@ struct AspaceIApp: App {
     @State private var accountManager: AccountManager
     @State private var instanceManager = InstanceManager()
     @State private var settingsManager = SettingsManager()
+    @State private var usageManager = UsageManager()
     @State private var loginManager: AccountLoginManager
 
     init() {
@@ -34,6 +35,7 @@ struct AspaceIApp: App {
                 .environment(instanceManager)
                 .environment(settingsManager)
                 .environment(loginManager)
+                .environment(usageManager)
         } label: {
             MenuBarLabel(items: MenuBarQuotaItem.items(
                 accounts: accountManager.accounts,
@@ -41,18 +43,19 @@ struct AspaceIApp: App {
                 mode: settingsManager.menuBarQuotaMode
             ))
                 .onChange(of: accountManager.accounts.map(\.label)) {
-                    instanceManager.refreshCloneIcons(accounts: accountManager)
+                    Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .onChange(of: instanceManager.instances) {
-                    instanceManager.refreshCloneIcons(accounts: accountManager)
+                    Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .onChange(of: instanceManager.signedInAccountUUIDs) {
-                    instanceManager.refreshCloneIcons(accounts: accountManager)
+                    Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .task {
                     instanceManager.startMonitoring(accounts: accountManager)
                     await accountManager.autoImportLocalAccounts()
                     accountManager.startAutomaticRefresh()
+                    usageManager.startAutomaticRefresh(instances: instanceManager)
                 }
         }
         .menuBarExtraStyle(.window)

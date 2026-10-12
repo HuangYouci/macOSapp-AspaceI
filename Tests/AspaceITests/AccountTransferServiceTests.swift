@@ -7,17 +7,17 @@ struct AccountTransferServiceTests {
     func roundTrips() throws {
         let items = [
             AccountTransferItem(platform: .codex, displayName: "work", email: "w@x.com", credential: Data(#"{"tokens":{"access_token":"a"}}"#.utf8)),
-            AccountTransferItem(platform: .githubCopilot, displayName: "GitHub", email: nil, credential: Data("github.com:\n  oauth_token: gho_x\n".utf8))
+            AccountTransferItem(platform: .claude, displayName: "Claude", email: nil, credential: Data("not-json".utf8))
         ]
         let decoded = try AccountTransferService.decode(try AccountTransferService.encode(items))
-        #expect(decoded.map(\.platform) == [.codex, .githubCopilot])
+        #expect(decoded.map(\.platform) == [.codex, .claude])
         #expect(decoded.first?.email == "w@x.com")
         #expect(decoded.last?.credential == items.last?.credential)
         let codex = try #require(try JSONSerialization.jsonObject(with: decoded[0].credential) as? [String: Any])
         #expect((codex["tokens"] as? [String: Any])?["access_token"] as? String == "a")
     }
 
-    @Test("其他工具的陣列格式依欄位判斷平台")
+    @Test("其他工具的陣列格式依欄位判斷平台，GitHub 帳號略過")
     func detectsForeignAccounts() throws {
         let json = """
         [
@@ -28,7 +28,7 @@ struct AccountTransferServiceTests {
         ]
         """
         let items = try AccountTransferService.decode(Data(json.utf8))
-        #expect(items.map(\.platform) == [.antigravity, .codex, .githubCopilot])
+        #expect(items.map(\.platform) == [.antigravity, .codex])
         let antigravity = try #require(try JSONSerialization.jsonObject(with: items[0].credential) as? [String: Any])
         #expect(antigravity["project_id"] as? String == "p")
     }
@@ -44,8 +44,8 @@ struct AccountTransferServiceTests {
         ]
         """
         let items = try AccountTransferService.decode(Data(json.utf8))
-        #expect(items.map(\.platform) == [.antigravity, .codex, .claude, .githubCopilot])
-        #expect(items.map(\.email) == ["g@x.com", "c@x.com", "k@x.com", "octocat"])
+        #expect(items.map(\.platform) == [.antigravity, .codex, .claude])
+        #expect(items.map(\.email) == ["g@x.com", "c@x.com", "k@x.com"])
         let claude = try #require(try JSONSerialization.jsonObject(with: items[2].credential) as? [String: Any])
         #expect((claude["claudeAiOauth"] as? [String: Any])?["accessToken"] as? String == "a")
     }

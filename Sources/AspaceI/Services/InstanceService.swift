@@ -7,6 +7,25 @@ struct InstanceStoreFile: Codable, Sendable {
     init(instances: [Instance] = []) {
         self.instances = instances
     }
+
+    private enum CodingKeys: String, CodingKey { case instances }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        instances = try container.decode([StoredInstance].self, forKey: .instances).compactMap(\.instance)
+    }
+}
+
+/// 平台已不支援（2026-10-12 移除 GitHub Copilot，連同 VS Code 實例）的實例略過，不讓整份清單讀不出來。
+struct StoredInstance: Decodable {
+    let instance: Instance?
+
+    private enum CodingKeys: String, CodingKey { case platform }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        instance = PlatformKind(rawValue: try container.decode(String.self, forKey: .platform)) == nil ? nil : try Instance(from: decoder)
+    }
 }
 
 final class InstanceService: Sendable {
@@ -17,8 +36,8 @@ final class InstanceService: Sendable {
         let url = try storeURL()
         guard FileManager.default.fileExists(atPath: url.path) else { return InstanceStoreFile() }
         let data = try Data(contentsOf: url)
-        if let legacy = try? JSONDecoder().decode([Instance].self, from: data) {
-            return InstanceStoreFile(instances: legacy)
+        if let legacy = try? JSONDecoder().decode([StoredInstance].self, from: data) {
+            return InstanceStoreFile(instances: legacy.compactMap(\.instance))
         }
         return try JSONDecoder().decode(InstanceStoreFile.self, from: data)
     }
@@ -37,7 +56,7 @@ final class InstanceService: Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = Self.openArguments(for: instance, appPath: appPath, isDefault: isDefault)
-        // open 會把自己的環境變數轉交給 App；DYLD_* 會讓 VS Code 啟動即結束。
+        // open 會把自己的環境變數轉交給 App；DYLD_* 會讓 Electron App 啟動即結束。
         process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("DYLD_") }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

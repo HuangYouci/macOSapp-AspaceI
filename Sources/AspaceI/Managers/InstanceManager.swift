@@ -16,7 +16,7 @@ final class InstanceManager {
         var all: [Instance] { [defaultInstance] + instances }
     }
 
-    static let groupOrder: [PlatformKind] = [.githubCopilot, .antigravity, .claude, .codex]
+    static let groupOrder: [PlatformKind] = [.antigravity, .claude, .codex]
 
     private(set) var instances: [Instance] = []
     private(set) var switchingPlatform: PlatformKind?
@@ -27,7 +27,9 @@ final class InstanceManager {
     private(set) var runningProcessIDs: [UUID: [Int32]] = [:]
     /// 實例 id → 該實例的 App 目前登入的平台帳號編號（目前只有 Claude）。
     private(set) var signedInAccountUUIDs: [UUID: String] = [:]
+    private(set) var isRefreshingRunning = false
     var errorMessage: String?
+    @ObservationIgnored private var refreshRunningQueued = false
 
     private let service = InstanceService.shared
     private let locator = ExecutableLocatorService.shared
@@ -176,7 +178,7 @@ final class InstanceManager {
             launch(instance, accounts: accounts)
         }
         if let failure { errorMessage = failure.localizedDescription }
-        refreshRunning()
+        await refreshRunning()
     }
 
     /// 安裝通常幾秒內完成；等到 60 秒還在就放棄，讓使用者至少拿回實例。
@@ -245,8 +247,8 @@ final class InstanceManager {
     /// 短名稱的撞名規則看的是所有帳號與沒帳號的實例名稱，任一帳號增刪改名都可能讓別的實例圖示上的字跟著變。
     /// 沒在執行、已經有複本的實例立刻重做（`prepare` 字沒變就只沿用）；執行中的 Dock 圖示跟著程序改不了，下次啟動時重做。
     /// 有更新程式在跑的平台整組跳過，免得在安裝途中換掉它要裝的那份。
-    func refreshCloneIcons(accounts: AccountManager) {
-        let processes = service.runningProcessIDs()
+    func refreshCloneIcons(accounts: AccountManager) async {
+        let processes = await processList()
         for group in groups where group.isInstalled {
             let appPath = group.defaultInstance.executablePath
             guard InstanceService.updaterProcessIDs(appPath: appPath, cloneFolders: cloneFolders(for: group.platform), in: processes).isEmpty else { continue }
@@ -320,6 +322,8 @@ final class InstanceManager {
     func startMonitoring(accounts: AccountManager) {
         monitoredAccounts = accounts
         guard launchObserver == nil else { return }
+        // 先抓一輪，第一次打開實例分頁時狀態就是對的，不必等背景的 ps 跑完。
+        Task { await refreshRunning() }
         launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
         ) { [weak self] notification in
@@ -361,8 +365,22 @@ final class InstanceManager {
         !(runningProcessIDs[instance.id] ?? []).isEmpty
     }
 
-    func refreshRunning() {
-        let processes = service.runningProcessIDs()
+    /// `ps` 在程序多的機器上要 0.5 到 3 秒（2026-10-12 實測 4800 個程序），只能在背景跑；
+    /// 主執行緒等它的話，切到實例分頁會整個 popup 卡住。進行中再被呼叫就排到這輪之後再跑一次。
+    func refreshRunning() async {
+        guard !isRefreshingRunning else {
+            refreshRunningQueued = true
+            return
+        }
+        isRefreshingRunning = true
+        defer { isRefreshingRunning = false }
+        repeat {
+            refreshRunningQueued = false
+            applyRunning(await processList())
+        } while refreshRunningQueued
+    }
+
+    private func applyRunning(_ processes: [Int32: String]) {
         var result: [UUID: [Int32]] = [:]
         var signedIn: [UUID: String] = [:]
         var pendingUpdates: Set<PlatformKind> = []
@@ -402,7 +420,7 @@ final class InstanceManager {
         Task { [weak self] in
             for delay in [1, 3] {
                 try? await Task.sleep(for: .seconds(delay))
-                self?.refreshRunning()
+                await self?.refreshRunning()
             }
         }
     }

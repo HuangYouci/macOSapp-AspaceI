@@ -70,7 +70,7 @@ enum AccountTransferService {
 
     /// 其他工具（例如 cockpit-tools）匯出的帳號：依欄位形狀判斷平台。
     static func decodeForeign(_ entry: [String: Any]) -> AccountTransferItem? {
-        let email = entry["email"] as? String ?? entry["github_email"] as? String ?? entry["github_login"] as? String
+        let email = entry["email"] as? String
         func item(_ platform: PlatformKind, _ credential: Any) -> AccountTransferItem? {
             guard JSONSerialization.isValidJSONObject(credential),
                   let data = try? JSONSerialization.data(withJSONObject: credential, options: [.sortedKeys]) else { return nil }
@@ -89,10 +89,9 @@ enum AccountTransferService {
         if entry["auth_mode"] as? String == "setup_token", let token = entry["api_key"] as? String {
             return item(.claude, ["accessToken": token])
         }
-        let githubToken = entry["github_access_token"] as? String
-            ?? (entry["access_token"] as? String).flatMap { $0.hasPrefix("gh") ? $0 : nil }
-        if let githubToken {
-            return item(.githubCopilot, ["access_token": githubToken])
+        // GitHub Copilot 已不支援（2026-10-12 移除）；它的帳號不能落到下面當成 Antigravity。
+        if entry["github_access_token"] != nil || entry["github_login"] != nil {
+            return nil
         }
         let token = entry["token"] as? [String: Any]
         if let refreshToken = entry["refresh_token"] as? String ?? entry["refreshToken"] as? String ?? token?["refresh_token"] as? String {

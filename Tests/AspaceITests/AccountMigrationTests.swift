@@ -15,8 +15,7 @@ struct AccountMigrationTests {
 
     @Test("舊資料沒有 origin 時依來源路徑推斷")
     func infersOriginFromLegacySourcePath() {
-        #expect(Account.inferOrigin(sourcePath: "GitHub CLI") == .local)
-        #expect(Account.inferOrigin(sourcePath: "/Users/a/.config/gh/hosts.yml") == .local)
+        #expect(Account.inferOrigin(sourcePath: "/Users/a/.codex/auth.json") == .local)
         #expect(Account.inferOrigin(sourcePath: "/Users/a/.gemini/jetski-standalone-oauth-token") == .local)
         #expect(Account.inferOrigin(sourcePath: "手動加入") == .manual)
         #expect(Account.inferOrigin(sourcePath: "/Users/a/Downloads/work.json") == .file)
@@ -25,9 +24,9 @@ struct AccountMigrationTests {
     @Test("同平台重複的本機帳號只留有憑證的那一個，並補回目前帳號")
     @MainActor
     func collapsesDuplicateLocalAccounts() {
-        let orphan = Account(platform: .githubCopilot, displayName: "GitHub", sourcePath: "hosts.yml", isActive: true, origin: .local)
-        let withCredential = Account(platform: .githubCopilot, displayName: "GitHub", credentialReference: "githubCopilot.x", sourcePath: "GitHub CLI", origin: .local)
-        let manual = Account(platform: .githubCopilot, displayName: "Work", credentialReference: "githubCopilot.y", origin: .manual)
+        let orphan = Account(platform: .codex, displayName: "Codex", sourcePath: "auth.json", isActive: true, origin: .local)
+        let withCredential = Account(platform: .codex, displayName: "Codex", credentialReference: "codex.x", sourcePath: "/u/.codex/auth.json", origin: .local)
+        let manual = Account(platform: .codex, displayName: "Work", credentialReference: "codex.y", origin: .manual)
         let (kept, dropped) = AccountManager.collapsingDuplicateLocalAccounts([orphan, withCredential, manual])
         #expect(dropped.map(\.id) == [orphan.id])
         #expect(kept.map(\.id) == [withCredential.id, manual.id])
@@ -128,10 +127,33 @@ struct DefaultClientProjectionTests {
         #expect(written.count == 1)
     }
 
-    @Test("Claude 與 Copilot 不支援切換")
+    @Test("Claude 不支援切換")
     func rejectsUnsupported() {
         #expect(throws: CredentialProjectionError.self) {
             try CredentialProjectionService.shared.projectToDefaultClient(account: Account(platform: .claude, displayName: ""), credentialData: Data("{}".utf8))
         }
+    }
+}
+
+struct RetiredPlatformTests {
+    @Test("已移除的 GitHub Copilot 帳號不讓清單讀不出來，交出憑證位置清掉")
+    func dropsRetiredAccounts() throws {
+        let codex = Account(platform: .codex, displayName: "work", credentialReference: "codex.a")
+        var entries = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode([codex])) as? [[String: Any]])
+        entries.append(["id": UUID().uuidString, "platform": "githubCopilot", "displayName": "GitHub", "credentialReference": "githubCopilot.b"])
+        let loaded = try AccountStore.decode(JSONSerialization.data(withJSONObject: entries))
+        #expect(loaded.accounts.map(\.id) == [codex.id])
+        #expect(loaded.retiredCredentialReferences == ["githubCopilot.b"])
+    }
+
+    @Test("已移除平台的實例略過，其餘照常讀出")
+    func dropsRetiredInstances() throws {
+        let claude = Instance(name: "1-big", platform: .claude, profileDirectory: "/p/c", executablePath: "/Applications/Claude.app")
+        var root = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(InstanceStoreFile(instances: [claude]))) as? [String: Any])
+        var instances = try #require(root["instances"] as? [[String: Any]])
+        instances.append(["id": UUID().uuidString, "name": "VS Code 2", "platform": "githubCopilot", "profileDirectory": "/p/v", "executablePath": "/Applications/Visual Studio Code.app", "arguments": []])
+        root["instances"] = instances
+        let decoded = try JSONDecoder().decode(InstanceStoreFile.self, from: JSONSerialization.data(withJSONObject: root))
+        #expect(decoded.instances == [claude])
     }
 }

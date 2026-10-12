@@ -11,8 +11,6 @@ final class CredentialProjectionService: Sendable {
             try write(credentialData, to: profileDirectory.appending(path: "auth.json"))
         case .claude:
             try write(credentialData, to: profileDirectory.appending(path: ".credentials.json"))
-        case .githubCopilot:
-            return
         case .antigravity:
             guard let sourcePath = account.sourcePath, FileManager.default.fileExists(atPath: sourcePath) else { throw CredentialProjectionError.sourceMissing }
             guard URL(fileURLWithPath: sourcePath).pathExtension.lowercased() == "vscdb" else { throw CredentialProjectionError.antigravityProfileRequired }
@@ -53,7 +51,7 @@ final class CredentialProjectionService: Sendable {
             let directory = homeDirectory.appending(path: ".gemini", directoryHint: .isDirectory)
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try? write(token, to: directory.appending(path: "jetski-standalone-oauth-token"))
-        case .claude, .githubCopilot:
+        case .claude:
             throw CredentialProjectionError.switchUnsupported
         }
     }

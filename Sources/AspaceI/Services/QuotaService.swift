@@ -10,8 +10,6 @@ final class QuotaService: Sendable {
             return try await fetchCodex(data: credentialData)
         case .claude:
             return try await fetchClaude(data: credentialData, account: account)
-        case .githubCopilot:
-            return try await fetchGitHub(data: credentialData)
         case .antigravity:
             return try await fetchAntigravity(data: credentialData, account: account)
         }
@@ -257,59 +255,6 @@ final class QuotaService: Sendable {
         guard let value = raw as? [String: Any], let used = value["utilization"] as? NSNumber else { return nil }
         let reset = (value["resets_at"] as? String).flatMap(parseISODate)
         return QuotaWindow(id: kind.rawValue, title: kind.shortTitle, remainingPercentage: 100 - Int(used.doubleValue.rounded()), resetsAt: reset, kind: kind)
-    }
-
-    // MARK: GitHub Copilot
-
-    private func fetchGitHub(data: Data) async throws -> QuotaSnapshot {
-        let jsonToken: String?
-        do {
-            jsonToken = try jsonObject(data)["access_token"] as? String
-        } catch {
-            jsonToken = nil
-        }
-        let text = String(data: data, encoding: .utf8)
-        let yamlToken = text?.split(separator: "\n").first(where: { $0.contains("oauth_token:") })?.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces)
-        guard let token = jsonToken ?? yamlToken, !token.isEmpty else { throw QuotaError.missingToken }
-        let value = try await requestJSON(url: try endpoint("https://api.github.com/copilot_internal/user"), token: token)
-        return try Self.parseCopilotQuota(value)
-    }
-
-    /// 付費方案看 premium requests；免費方案沒有 premium 額度時退回 chat。
-    static func parseCopilotQuota(_ value: [String: Any]) throws -> QuotaSnapshot {
-        guard let snapshots = value["quota_snapshots"] as? [String: Any] else { throw QuotaError.invalidResponse }
-        let reset = (value["quota_reset_date_utc"] as? String).flatMap(parseISODate)
-        let premium = snapshots["premium_interactions"] as? [String: Any]
-        let chat = snapshots["chat"] as? [String: Any]
-        let premiumAvailable = premium.map { ($0["unlimited"] as? Bool == true) || ($0["entitlement"] as? NSNumber)?.doubleValue ?? 0 > 0 } ?? false
-        guard let selected = premiumAvailable ? premium : chat else { throw QuotaError.invalidResponse }
-        let percentage: Int
-        if selected["unlimited"] as? Bool == true {
-            percentage = 100
-        } else if let remaining = selected["percent_remaining"] as? NSNumber {
-            percentage = Int(remaining.doubleValue.rounded())
-        } else {
-            throw QuotaError.invalidResponse
-        }
-        let window = QuotaWindow(
-            id: premiumAvailable ? "premium" : "chat",
-            title: QuotaWindow.Kind.month.shortTitle,
-            remainingPercentage: percentage,
-            resetsAt: reset,
-            kind: .month
-        )
-        return QuotaSnapshot(windows: [window], fetchedAt: .now, identity: value["login"] as? String, plan: parseCopilotPlan(value))
-    }
-
-    static func parseCopilotPlan(_ value: [String: Any]) -> String? {
-        let sku = (value["access_type_sku"] as? String)?.lowercased() ?? ""
-        let plan = (value["copilot_plan"] as? String)?.lowercased() ?? ""
-        if sku.contains("free") { return "Free" }
-        if plan == "enterprise" { return "Enterprise" }
-        if plan == "business" { return "Business" }
-        if sku.contains("plus") { return "Pro+" }
-        if plan == "individual" { return "Pro" }
-        return nil
     }
 
     // MARK: Helpers
