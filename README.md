@@ -1,6 +1,6 @@
 # AspaceI
 
-AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex、Antigravity 的多個帳號：看額度、切換帳號、用不同帳號同時開多個 App 實例。
+AspaceI 是 macOS 選單列工具，集中管理 Claude、Codex、Antigravity 的多個帳號：看額度、切換帳號、用不同帳號同時開多個 App 實例。
 
 - 選單列最多同時顯示 3 個帳號的額度：`{icon} abc 12% 40% | …`（`abc` 為三字短名稱）
 - 不建立主視窗、不顯示 Dock 圖示
@@ -19,7 +19,6 @@ AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex
 | Codex | ● | ● | | Plus / Pro 5x / Pro 20x … |
 | Claude | ● | ● | | Pro / Max 5x / Max 20x … |
 | Antigravity | ● | ● | | Free / Pro / Ultra |
-| GitHub Copilot | | | ● | Free / Pro / Pro+ / Business … |
 
 - 每 5 分鐘自動更新，粗體為目前使用中的帳號。
 - Codex Pro 帳號若只回傳週額度，就只顯示週欄位。
@@ -29,18 +28,20 @@ AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex
 
 **加入帳號**有三種方式：
 
-| 方式 | Codex | Claude | Antigravity | GitHub Copilot |
+| 方式 | Codex | Claude | Antigravity |
 | --- | --- | --- | --- | --- |
-| 瀏覽器登入 | OpenAI OAuth | Claude OAuth（貼回授權碼） | Google OAuth | GitHub 裝置碼 |
-| 讀取這台 Mac | `~/.codex/auth.json` | Claude Code 的 Keychain 或 `~/.claude/.credentials.json` | `~/.gemini/jetski-standalone-oauth-token` | `gh auth token` 或 `~/.config/gh/hosts.yml` |
-| 貼上或拖入 | `auth.json` 內容 | `.credentials.json` 內容、`sk-ant-oat…` | refresh token（`1//…`）或 token 檔 | `gho_…` / `ghu_…` token |
+| 瀏覽器登入 | OpenAI OAuth | Claude OAuth（貼回授權碼） | Google OAuth |
+| 讀取這台 Mac | `~/.codex/auth.json` | Claude Code 的 Keychain 或 `~/.claude/.credentials.json` | `~/.gemini/jetski-standalone-oauth-token` |
+| 貼上或拖入 | `auth.json` 內容 | `.credentials.json` 內容、`sk-ant-oat…` | refresh token（`1//…`）或 token 檔 |
 
 貼上的內容會自動辨識服務與格式。
 
 **切換帳號**（⋮ 選單）：
 
 - **Codex、Antigravity**：寫入官方 App 讀取的登入檔，App 開著時會先確認、關閉，再以新帳號重新開啟。
-- **Claude、GitHub Copilot**：官方 App 的登入存在加密儲存，無法由外部寫入，只能在 AspaceI 內標記為目前帳號。
+- **Claude**：官方 App 的登入存在加密儲存，無法由外部寫入，只能在 AspaceI 內標記為目前帳號。
+
+GitHub Copilot 已於 26.10.12 之後移除；舊版加入的 GitHub 帳號會在啟動時連同 Keychain 裡的 token 一起刪除。
 
 **Token 保活**：Codex、Claude 的 token 會在過期前自動換新；正在官方 App 中使用的帳號交由官方 App 換新，避免互相把對方登出。
 
@@ -54,7 +55,7 @@ AspaceI 是 macOS 選單列工具，集中管理 GitHub Copilot、Claude、Codex
 
 ### 實例
 
-依 VS Code、Antigravity、Claude、Codex 分組。每組第一個是預設實例（就是平常打開的 App），可另外新增實例，各自使用獨立的資料夾與帳號，同時執行互不干擾。
+依 Antigravity、Claude、Codex 分組。每組第一個是預設實例（就是平常打開的 App），可另外新增實例，各自使用獨立的資料夾與帳號，同時執行互不干擾。
 
 新增的實例會以一份 App 複本開啟，Dock 圖示右下角標上與選單列相同的三字短名稱，用來分辨同時開著的多個 Claude／Codex。滑鼠移到 Dock 圖示上會顯示「App 名稱 - 帳號名稱」。複本不修改 App 內容、不重新簽署。
 
@@ -106,7 +107,7 @@ cp -R dist/AspaceI.app /Applications/
 1. 在 Cockpit Tools 匯出帳號 JSON。
 2. AspaceI「設定 → 匯入帳號 → 選擇檔案…」選那個檔案。
 
-支援 Codex、Claude（OAuth 與 setup token）、Antigravity、GitHub Copilot 帳號。Cockpit 的 Claude Desktop 帳號是加密保存且不會被匯出，需要在 AspaceI 重新以瀏覽器登入。
+支援 Codex、Claude（OAuth 與 setup token）、Antigravity 帳號（GitHub Copilot 帳號會略過）。Cockpit 的 Claude Desktop 帳號是加密保存且不會被匯出，需要在 AspaceI 重新以瀏覽器登入。
 
 ## 匯入匯出格式
 
@@ -126,10 +127,10 @@ cp -R dist/AspaceI.app /Applications/
 
 ## 安全與限制
 
-- 網路連線只會連往各服務供應商（OpenAI、Anthropic、Google、GitHub）。
+- 網路連線只會連往各服務供應商（OpenAI、Anthropic、Google）。
 - 程式碼中的 OAuth client ID／secret 是各官方桌面與命令列工具公開內建的值，不是個人憑證；Google 對「已安裝應用程式」類型的 secret 不視為機密。
 - 額度與登入使用的是官方工具內部介面，並非公開 API，供應商改版時可能失效，也可能不符合其服務條款，請自行評估。
-- 本專案與 OpenAI、Anthropic、Google、GitHub 無任何關係。
+- 本專案與 OpenAI、Anthropic、Google 無任何關係。
 
 回報安全問題請見 [SECURITY.md](SECURITY.md)，請勿在 Issue 中貼出 token 或 `auth.json`。
 

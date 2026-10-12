@@ -6,7 +6,6 @@ extension PlatformKind {
         case .antigravity: "AG"
         case .codex: "CX"
         case .claude: "CL"
-        case .githubCopilot: "GH"
         }
     }
 
@@ -15,7 +14,6 @@ extension PlatformKind {
         case .antigravity: .blue
         case .codex: .primary
         case .claude: .orange
-        case .githubCopilot: .purple
         }
     }
 }

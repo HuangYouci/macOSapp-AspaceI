@@ -142,7 +142,7 @@ actor UsageScanService {
                 if let entry = UsageLineParser.codexEntry(line: line, state: &state) { record.append(entry) }
             }
             record.codexState = state
-        case .antigravity, .githubCopilot:
+        case .antigravity:
             break
         }
         record.size = file.size

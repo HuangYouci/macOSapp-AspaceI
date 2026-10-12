@@ -20,7 +20,6 @@ final class ExecutableLocatorService: Sendable {
 
     static func bundleIdentifiers(for platform: PlatformKind) -> [String] {
         switch platform {
-        case .githubCopilot: ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders"]
         case .antigravity: ["com.google.antigravity", "com.google.antigravity-ide"]
         case .claude: ["com.anthropic.claudefordesktop"]
         case .codex: ["com.openai.codex"]
@@ -29,7 +28,6 @@ final class ExecutableLocatorService: Sendable {
 
     static func candidatePaths(for platform: PlatformKind, homeDirectory: URL) -> [String] {
         let names: [String] = switch platform {
-        case .githubCopilot: ["Visual Studio Code.app", "Visual Studio Code - Insiders.app"]
         case .antigravity: ["Antigravity.app", "Antigravity IDE.app"]
         case .claude: ["Claude.app"]
         case .codex: ["ChatGPT.app", "Codex.app"]

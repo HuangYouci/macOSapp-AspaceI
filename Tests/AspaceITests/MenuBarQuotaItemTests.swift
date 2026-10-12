@@ -18,10 +18,10 @@ struct MenuBarQuotaItemTests {
             QuotaWindow(id: "5h", title: "5h", remainingPercentage: 82, resetsAt: nil, kind: .fiveHour),
             QuotaWindow(id: "7d", title: "7d", remainingPercentage: 64, resetsAt: nil, kind: .week)
         ])
-        let copilot = account(.githubCopilot, email: "octocat", windows: [
+        let monthly = account(.codex, email: "octocat", windows: [
             QuotaWindow(id: "premium", title: "月", remainingPercentage: 40, resetsAt: nil, kind: .month)
         ])
-        let items = MenuBarQuotaItem.items(accounts: [claude, copilot], selectedIDs: [copilot.id, claude.id])
+        let items = MenuBarQuotaItem.items(accounts: [claude, monthly], selectedIDs: [monthly.id, claude.id])
         #expect(items.map(\.name) == ["oct", "hua"])
         #expect(items.map(\.percentages) == [["40%"], ["82%", "64%"]])
     }
@@ -74,14 +74,14 @@ struct MenuBarQuotaItemTests {
 
     @Test("帳號沒有所選時窗時退回剩餘最少的那格")
     func fallsBackToLowestWhenKindMissing() {
-        let copilot = account(.githubCopilot, email: "octocat", windows: [
+        let monthly = account(.codex, email: "octocat", windows: [
             QuotaWindow(id: "premium", title: "月", remainingPercentage: 40, resetsAt: nil, kind: .month)
         ])
         let codex = account(.codex, email: nil, windows: [
             QuotaWindow(id: "5h", title: "5h", remainingPercentage: 90, resetsAt: nil, kind: .fiveHour),
             QuotaWindow(id: "7d", title: "7d", remainingPercentage: 30, resetsAt: nil, kind: .week)
         ])
-        #expect(MenuBarQuotaItem.percentages(for: copilot, mode: .session) == ["40%"])
+        #expect(MenuBarQuotaItem.percentages(for: monthly, mode: .session) == ["40%"])
         #expect(MenuBarQuotaItem.percentages(for: codex, mode: .month) == ["30%"])
     }
 

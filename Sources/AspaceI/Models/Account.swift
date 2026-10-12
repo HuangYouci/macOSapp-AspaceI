@@ -81,7 +81,7 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     static func inferOrigin(sourcePath: String?) -> Origin {
         guard let sourcePath else { return .local }
         if sourcePath == "手動加入" { return .manual }
-        let localMarkers = ["macOS Keychain", "GitHub CLI", "/.codex/", "/.claude/", "/gh/hosts.yml", "Antigravity IDE/User/globalStorage/state.vscdb", "/.gemini/jetski-standalone-oauth-token"]
+        let localMarkers = ["macOS Keychain", "/.codex/", "/.claude/", "Antigravity IDE/User/globalStorage/state.vscdb", "/.gemini/jetski-standalone-oauth-token"]
         return localMarkers.contains { sourcePath.contains($0) } ? .local : .file
     }
 }

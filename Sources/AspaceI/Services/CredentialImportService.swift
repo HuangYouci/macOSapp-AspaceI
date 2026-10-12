@@ -21,7 +21,6 @@ final class CredentialImportService: Sendable {
         case .codex: [homeDirectory.appending(path: ".codex/auth.json")]
         case .claude: [homeDirectory.appending(path: ".claude/.credentials.json")]
         case .antigravity: [homeDirectory.appending(path: ".gemini/jetski-standalone-oauth-token"), support.appending(path: "Antigravity IDE/User/globalStorage/state.vscdb")]
-        case .githubCopilot: [homeDirectory.appending(path: ".config/gh/hosts.yml")]
         }
     }
 
@@ -34,7 +33,6 @@ final class CredentialImportService: Sendable {
         return [
             platforms.contains(.codex) ? importedCodex(from: codexHome, includeKeychain: includeKeychain) : nil,
             platforms.contains(.claude) ? importedClaude(from: claudeHome, includeKeychain: includeKeychain) : nil,
-            platforms.contains(.githubCopilot) ? importedGitHub(homeDirectory: homeDirectory) : nil,
             platforms.contains(.antigravity) ? importedAntigravity(tokenFile: antigravityToken, database: antigravityDatabase, includeKeychain: includeKeychain) : nil
         ].compactMap { $0 }
     }
@@ -44,13 +42,13 @@ final class CredentialImportService: Sendable {
         guard !trimmed.isEmpty else { throw CredentialImportError.emptyFile }
         let data: Data
         let rawData = Data(trimmed.utf8)
-        if (try? JSONSerialization.jsonObject(with: rawData)) != nil || (platform == .githubCopilot && trimmed.contains("oauth_token:")) {
+        if (try? JSONSerialization.jsonObject(with: rawData)) != nil {
             data = rawData
         } else {
             let key: String = switch platform {
             case .claude: "accessToken"
             case .antigravity: trimmed.hasPrefix("1//") ? "refresh_token" : "access_token"
-            case .codex, .githubCopilot: "access_token"
+            case .codex: "access_token"
             }
             data = try JSONSerialization.data(withJSONObject: [key: trimmed])
         }
@@ -82,15 +80,6 @@ final class CredentialImportService: Sendable {
         let file = directory.appending(path: ".credentials.json")
         guard let data = nonemptyData(at: file) else { return nil }
         return ImportedCredential(platform: .claude, displayName: PlatformKind.claude.displayName, sourcePath: file.path, data: data)
-    }
-
-    private func importedGitHub(homeDirectory: URL) -> ImportedCredential? {
-        let file = homeDirectory.appending(path: ".config/gh/hosts.yml")
-        if let data = githubCredentialFromCLI() {
-            return ImportedCredential(platform: .githubCopilot, displayName: PlatformKind.githubCopilot.displayName, sourcePath: "GitHub CLI", data: data)
-        }
-        guard let data = nonemptyData(at: file) else { return nil }
-        return ImportedCredential(platform: .githubCopilot, displayName: PlatformKind.githubCopilot.displayName, sourcePath: file.path, data: data)
     }
 
     /// Antigravity 2.0 起登入放在登入 Keychain，但只在使用者主動按「讀取這台 Mac」時才讀：
@@ -160,29 +149,6 @@ final class CredentialImportService: Sendable {
         if !isAntigravityDatabase, data?.isEmpty != false { throw CredentialImportError.emptyFile }
         let fileName = url.deletingPathExtension().lastPathComponent
         return ImportedCredential(platform: platform, displayName: fileName.isEmpty ? platform.displayName : fileName, sourcePath: url.path, data: data)
-    }
-
-    private func githubCredentialFromCLI() -> Data? {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["gh", "auth", "token", "--hostname", "github.com"]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-        let token = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else { return nil }
-        do {
-            return try JSONSerialization.data(withJSONObject: ["access_token": token])
-        } catch {
-            return nil
-        }
     }
 }
 

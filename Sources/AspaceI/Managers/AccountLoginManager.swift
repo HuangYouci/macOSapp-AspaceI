@@ -10,7 +10,6 @@ final class AccountLoginManager {
         case idle
         case waitingForBrowser
         case awaitingCode
-        case deviceCode(userCode: String, verificationURL: URL)
         case exchanging
         case succeeded(PlatformKind)
         case failed(String)
@@ -40,10 +39,6 @@ final class AccountLoginManager {
         cancel()
         pastedCode = ""
         self.platform = platform
-        if platform == .githubCopilot {
-            startDeviceFlow()
-            return
-        }
         guard let authorization = OAuthService.authorization(for: platform) else {
             phase = .failed(OAuthError.invalidResponse.localizedDescription)
             return
@@ -100,13 +95,6 @@ final class AccountLoginManager {
         }
     }
 
-    func openVerificationPage() {
-        guard case .deviceCode(let userCode, let url) = phase else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(userCode, forType: .string)
-        NSWorkspace.shared.open(url)
-    }
-
     func cancel() {
         task?.cancel()
         task = nil
@@ -114,24 +102,5 @@ final class AccountLoginManager {
         authorization = nil
         platform = nil
         phase = .idle
-    }
-
-    private func startDeviceFlow() {
-        phase = .exchanging
-        task = Task { [weak self, service] in
-            do {
-                let device = try await service.requestGitHubDeviceCode()
-                self?.phase = .deviceCode(userCode: device.userCode, verificationURL: device.verificationURL)
-                self?.openVerificationPage()
-                let credential = try await service.pollGitHubToken(device)
-                self?.phase = .exchanging
-                await self?.onCredential(credential)
-                self?.phase = .succeeded(credential.platform)
-            } catch is CancellationError {
-                return
-            } catch {
-                self?.phase = .failed(error.localizedDescription)
-            }
-        }
     }
 }

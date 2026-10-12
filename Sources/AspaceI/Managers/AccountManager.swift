@@ -411,7 +411,7 @@ final class AccountManager {
         return account.origin == .local
     }
 
-    /// 憑證裡的登入身分：Codex 與 Antigravity 都帶 id_token，Claude 與 GitHub 的憑證看不出身分。
+    /// 憑證裡的登入身分：Codex 與 Antigravity 都帶 id_token，Claude 的憑證看不出身分。
     static func credentialEmail(_ data: Data, platform: PlatformKind) -> String? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         let idToken: String?
@@ -420,7 +420,7 @@ final class AccountManager {
             idToken = (root["tokens"] as? [String: Any])?["id_token"] as? String ?? root["id_token"] as? String
         case .antigravity:
             idToken = root["id_token"] as? String ?? (root["token"] as? [String: Any])?["id_token"] as? String
-        case .claude, .githubCopilot:
+        case .claude:
             idToken = nil
         }
         guard let idToken, let email = OAuthService.jwtClaims(idToken)?["email"] as? String, !email.isEmpty else { return nil }
@@ -513,12 +513,16 @@ final class AccountManager {
     private func loadAccounts() {
         do {
             let loaded = try accountStore.load()
-            let (kept, dropped) = Self.collapsingDuplicateLocalAccounts(loaded)
+            let (kept, dropped) = Self.collapsingDuplicateLocalAccounts(loaded.accounts)
             accounts = kept
             for account in dropped {
                 if let reference = account.credentialReference { try keychainService.delete(account: reference) }
             }
-            if !dropped.isEmpty { persistAccounts() }
+            // 已不支援的平台（GitHub Copilot）的帳號：連同 Keychain 裡的 token 一起清掉。
+            for reference in loaded.retiredCredentialReferences {
+                try keychainService.delete(account: reference)
+            }
+            if !dropped.isEmpty || !loaded.retiredCredentialReferences.isEmpty { persistAccounts() }
             alignActiveWithDefaultClient()
         } catch {
             errorMessage = error.localizedDescription

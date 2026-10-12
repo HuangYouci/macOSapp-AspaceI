@@ -16,7 +16,7 @@ final class InstanceManager {
         var all: [Instance] { [defaultInstance] + instances }
     }
 
-    static let groupOrder: [PlatformKind] = [.githubCopilot, .antigravity, .claude, .codex]
+    static let groupOrder: [PlatformKind] = [.antigravity, .claude, .codex]
 
     private(set) var instances: [Instance] = []
     private(set) var switchingPlatform: PlatformKind?
