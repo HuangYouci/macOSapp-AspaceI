@@ -242,6 +242,25 @@ final class InstanceManager {
         )
     }
 
+    /// 短名稱的撞名規則看的是所有帳號與沒帳號的實例名稱，任一帳號增刪改名都可能讓別的實例圖示上的字跟著變。
+    /// 沒在執行、已經有複本的實例立刻重做（`prepare` 字沒變就只沿用）；執行中的 Dock 圖示跟著程序改不了，下次啟動時重做。
+    /// 有更新程式在跑的平台整組跳過，免得在安裝途中換掉它要裝的那份。
+    func refreshCloneIcons(accounts: AccountManager) {
+        let processes = service.runningProcessIDs()
+        for group in groups where group.isInstalled {
+            let appPath = group.defaultInstance.executablePath
+            guard InstanceService.updaterProcessIDs(appPath: appPath, cloneFolders: cloneFolders(for: group.platform), in: processes).isEmpty else { continue }
+            for instance in group.instances where InstanceService.mainProcessIDs(for: instance, isDefault: false, in: processes).isEmpty {
+                do {
+                    guard try !clones.bundles(for: instance.id).isEmpty else { continue }
+                    _ = try prepareClone(for: instance, accounts: accounts)
+                } catch {
+                    logger.error("InstanceManager.refreshCloneIcons | 更新 \(instance.name, privacy: .public) 的圖示失敗：\(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+    }
+
     private func account(for instance: Instance, accounts: AccountManager) -> Account? {
         if instance.platform == .claude {
             guard let uuid = service.claudeSignedInAccountUUID(for: instance, isDefault: false) else { return nil }
