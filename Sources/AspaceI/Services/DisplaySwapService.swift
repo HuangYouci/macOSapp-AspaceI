@@ -24,6 +24,7 @@ final class DisplaySwapService: Sendable {
     private static let messagingTimeout: Float = 0.3
     /// Accessibility 與視窗清單的座標可能差到小數點，比對時容許的誤差。
     private static let matchTolerance: CGFloat = 2
+    private static let enhancedUserInterface = "AXEnhancedUserInterface"
 
     func isTrusted(prompt: Bool) -> Bool {
         let options = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
@@ -49,27 +50,20 @@ final class DisplaySwapService: Sendable {
     }
 
     /// 只搬目前畫面上看得到的視窗：最小化、全螢幕、其他桌面空間裡的視窗都留在原處。
+    /// 每個 App 各自在一條執行緒上讀與搬，總耗時取決於最慢的那個 App，而不是全部加總。
     func swap(_ first: ConnectedDisplay, _ second: ConnectedDisplay, excluding ownPID: pid_t) -> DisplaySwapResult {
-        let windows = visibleWindows(excluding: ownPID)
-        let moves = DisplaySwapGeometry.plan(
-            windows: windows.map(\.frame),
-            screens: [first.frame, second.frame],
-            visible: [first.visibleFrame, second.visibleFrame],
-            first: 0,
-            second: 1
-        )
-        var result = DisplaySwapResult()
-        for (index, target) in moves {
-            if move(windows[index].element, to: target) {
-                result.moved += 1
-            } else {
-                result.failed += 1
-            }
+        let apps = onScreenFrames(excluding: ownPID)
+        let screens = [first.frame, second.frame]
+        let visible = [first.visibleFrame, second.visibleFrame]
+        let tally = SwapTally()
+        DispatchQueue.concurrentPerform(iterations: apps.count) { index in
+            let app = apps[index]
+            tally.add(swapWindows(of: app.pid, onScreen: app.frames, screens: screens, visible: visible))
         }
-        return result
+        return tally.result
     }
 
-    private func visibleWindows(excluding ownPID: pid_t) -> [(element: AXUIElement, frame: CGRect)] {
+    private func onScreenFrames(excluding ownPID: pid_t) -> [(pid: pid_t, frames: [CGRect])] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let info = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return [] }
         var onScreen: [pid_t: [CGRect]] = [:]
@@ -81,18 +75,40 @@ final class DisplaySwapService: Sendable {
                   let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { continue }
             onScreen[pid, default: []].append(bounds)
         }
+        return onScreen.map { ($0.key, $0.value) }
+    }
 
-        var result: [(element: AXUIElement, frame: CGRect)] = []
-        for (pid, frames) in onScreen {
-            let app = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-            guard let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { continue }
-            for window in windows {
-                if (attribute(window, kAXMinimizedAttribute) as? Bool) == true { continue }
-                if (attribute(window, "AXFullScreen") as? Bool) == true { continue }
-                guard let frame = frame(of: window),
-                      frames.contains(where: { Self.matches($0, frame) }) else { continue }
-                result.append((window, frame))
+    private func swapWindows(of pid: pid_t, onScreen: [CGRect], screens: [CGRect], visible: [CGRect]) -> DisplaySwapResult {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
+        guard let elements = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return DisplaySwapResult() }
+        var windows: [(element: AXUIElement, frame: CGRect)] = []
+        for window in elements {
+            if (attribute(window, kAXMinimizedAttribute) as? Bool) == true { continue }
+            if (attribute(window, "AXFullScreen") as? Bool) == true { continue }
+            guard let frame = frame(of: window),
+                  onScreen.contains(where: { Self.matches($0, frame) }) else { continue }
+            windows.append((window, frame))
+        }
+        let moves = DisplaySwapGeometry.plan(windows: windows.map(\.frame), screens: screens, visible: visible, first: 0, second: 1)
+        guard !moves.isEmpty else { return DisplaySwapResult() }
+
+        // 輔助增強模式開著時（Finder、開過螢幕閱讀器的瀏覽器），App 會用動畫慢慢移過去，搬完再開回來。
+        let enhanced = (attribute(app, Self.enhancedUserInterface) as? Bool) == true
+        if enhanced {
+            AXUIElementSetAttributeValue(app, Self.enhancedUserInterface as CFString, kCFBooleanFalse)
+        }
+        defer {
+            if enhanced {
+                AXUIElementSetAttributeValue(app, Self.enhancedUserInterface as CFString, kCFBooleanTrue)
+            }
+        }
+        var result = DisplaySwapResult()
+        for (index, target) in moves {
+            if move(windows[index].element, from: windows[index].frame, to: target) {
+                result.moved += 1
+            } else {
+                result.failed += 1
             }
         }
         return result
@@ -103,15 +119,32 @@ final class DisplaySwapService: Sendable {
             && abs(lhs.width - rhs.width) <= matchTolerance && abs(lhs.height - rhs.height) <= matchTolerance
     }
 
-    /// 先改大小再移位置、最後再改一次大小：從大螢幕搬到小螢幕時，視窗可能因為會超出邊界而拒絕先放大或先移動。
-    private func move(_ window: AXUIElement, to target: CGRect) -> Bool {
+    /// 每改一次大小 App 就重排一次畫面，呼叫越少越快：
+    /// 一樣大只移位置；變小先縮再移、變大先移再放，避免中途超出螢幕被 App 拒絕；長寬一增一減時才多補一次大小。
+    private func move(_ window: AXUIElement, from current: CGRect, to target: CGRect) -> Bool {
         var size = target.size
         var origin = target.origin
         guard let sizeValue = AXValueCreate(.cgSize, &size),
               let originValue = AXValueCreate(.cgPoint, &origin) else { return false }
-        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-        let positionError = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, originValue)
-        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
+        let setSize = { AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue) }
+        let setPosition = { AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, originValue) }
+        if current.size == target.size {
+            return setPosition() == .success
+        }
+        let shrinks = target.width <= current.width && target.height <= current.height
+        let grows = target.width >= current.width && target.height >= current.height
+        if shrinks {
+            _ = setSize()
+            return setPosition() == .success
+        }
+        if grows {
+            let positionError = setPosition()
+            _ = setSize()
+            return positionError == .success
+        }
+        _ = setSize()
+        let positionError = setPosition()
+        _ = setSize()
         return positionError == .success
     }
 
@@ -132,5 +165,22 @@ final class DisplaySwapService: Sendable {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
         return value
+    }
+}
+
+/// 各 App 的執行緒同時回報結果，用鎖保護加總。
+private final class SwapTally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var total = DisplaySwapResult()
+
+    var result: DisplaySwapResult {
+        lock.withLock { total }
+    }
+
+    func add(_ part: DisplaySwapResult) {
+        lock.withLock {
+            total.moved += part.moved
+            total.failed += part.failed
+        }
     }
 }

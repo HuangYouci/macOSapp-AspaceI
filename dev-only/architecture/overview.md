@@ -16,8 +16,8 @@
 - 螢幕以 `CGDisplayCreateUUIDFromDisplayID` 的 UUID 存，`CGDirectDisplayID` 重新接線會換號。螢幕名稱一起存，沒接上時設定頁仍認得出是哪一台。
 - 只搬「看得到」的視窗：先用 `CGWindowListCopyWindowInfo(.optionOnScreenOnly)` 拿第 0 層的視窗外框，再只留 Accessibility 視窗裡外框對得上的。單用 Accessibility 會拿到其他桌面空間與隱藏的視窗。最小化與 `AXFullScreen` 一律跳過。
 - 視窗歸屬看與螢幕重疊面積最大的那一個，不看中心點。兩邊先分好再一起搬，搬過去的不會被搬回來。換算用兩個螢幕的可用範圍（扣選單列、Dock）等比縮放並收進邊界，佔滿的視窗換過去仍佔滿。
-- 搬動順序是大小 → 位置 → 大小：從大螢幕搬到小螢幕時，部分 App 會拒絕先放大或先移到會超出邊界的位置。
-- 單一 App 的 Accessibility 呼叫逾時 0.3 秒，卡住的 App 不會拖住整次互換。搬動在背景執行緒做。
+- 速度（2026-10-13 負責人反映太慢後調整）：讀取本身不慢（實測 9 個 App 合計約 0.4 秒），慢在搬動。Electron App 每改一次大小就重排一次畫面，所以呼叫越少越好：一樣大只移位置；變小先縮再移、變大先移再放（避免中途超出螢幕被拒）；長寬一增一減才用大小 → 位置 → 大小。各 App 用 `concurrentPerform` 同時讀與搬，總耗時取決於最慢的那一個。`AXEnhancedUserInterface` 開著的 App（實測 Finder）會用動畫慢慢移，搬動期間暫時關掉、搬完開回來（沿用 Rectangle 的做法）。
+- 單一 App 的 Accessibility 呼叫逾時 0.3 秒，卡住的 App 不會拖住整次互換。
 - 快捷鍵用 Carbon `RegisterEventHotKey`：不需輔助使用權限、App 不在前景也收得到。註冊失敗通常是被別的 App 先註冊走，設定頁標示。錄製期間先撤掉全部熱鍵，否則按下已註冊的組合會直接觸發互換。錄製用 `NSEvent` 本機監聽，只在 popup 開著時有效。
 - 快捷鍵觸發時 popup 通常沒開，失敗（螢幕沒接、沒有權限）時同時發出提示音。
 - 輔助使用授權沒有通知，子頁開著時每秒查一次。權限綁簽章，`build-app.sh` 用固定的 Apple Development 憑證簽，重新建置不會失效；改用 ad-hoc 簽章就要重新允許。
