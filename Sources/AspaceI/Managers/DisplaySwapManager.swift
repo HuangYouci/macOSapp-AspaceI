@@ -29,6 +29,8 @@ final class DisplaySwapManager {
     @ObservationIgnored private let overlay = DisplaySwapOverlay()
     @ObservationIgnored private let recorder = ShortcutRecorder()
     @ObservationIgnored private var screenObserver: NSObjectProtocol?
+    /// 任務管理開著時，它所在的螢幕被互換，側欄與工作區要跟著過去。
+    @ObservationIgnored private weak var taskMode: TaskModeManager?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -42,8 +44,9 @@ final class DisplaySwapManager {
         }
     }
 
-    func start() {
+    func start(taskMode: TaskModeManager) {
         guard screenObserver == nil else { return }
+        self.taskMode = taskMode
         refreshDisplays()
         refreshTrust()
         registerHotKeys()
@@ -185,15 +188,18 @@ final class DisplaySwapManager {
         defer { isSwapping = false }
         let service = self.service
         let ownPID = ProcessInfo.processInfo.processIdentifier
+        let follow = taskMode?.swapFollow(first, second)
+        let overrides = follow?.targets ?? [:]
         let plan = await Task.detached {
-            service.plan(first, second, excluding: ownPID)
+            service.plan(first, second, excluding: ownPID, overrides: overrides)
         }.value
-        guard !plan.moves.isEmpty else { return }
+        guard !plan.moves.isEmpty || follow != nil else { return }
 
-        await showOverlay(for: plan, displays: [first, second])
+        await showOverlay(for: plan.moves + (follow?.sidebar.map { [$0] } ?? []), displays: [first, second])
         let result = await Task.detached {
             service.execute(plan)
         }.value
+        await taskMode?.didSwap(first, second)
         if overlay.isShowing {
             try? await Task.sleep(for: Self.redrawDelay)
             await overlay.dismiss()
@@ -204,11 +210,12 @@ final class DisplaySwapManager {
     /// 截圖失敗或沒有權限時不蓋，直接搬，互換本身不受影響。
     /// 動畫播完才搬真的視窗：同時搬的話視窗伺服器忙不過來，動畫會掉格、最後直接跳到終點（2026-10-13 錄影實測）。
     /// 搬動期間覆蓋層停在最終畫面，看起來已經換好了。
-    private func showOverlay(for plan: DisplaySwapPlan, displays: [ConnectedDisplay]) async {
+    /// 任務管理的側欄是自己的面板，不在互換清單裡，由呼叫端加進 `moves` 一起滑過去。
+    private func showOverlay(for moves: [PlannedWindowMove], displays: [ConnectedDisplay]) async {
         guard animates, snapshotService.hasPermission() else { return }
         let snapshots: DisplaySnapshots
         do {
-            snapshots = try await snapshotService.capture(displays: displays, hiding: Set(plan.moves.map(\.windowNumber)))
+            snapshots = try await snapshotService.capture(displays: displays, hiding: Set(moves.map(\.windowNumber)))
         } catch {
             Self.logger.error("截圖失敗，改為直接搬：\(error.localizedDescription, privacy: .public)")
             return
@@ -216,7 +223,7 @@ final class DisplaySwapManager {
         overlay.show(
             displays: displays,
             backgrounds: snapshots.backgrounds,
-            snapshots: plan.moves.compactMap { move in
+            snapshots: moves.compactMap { move in
                 snapshots.window(move.from, on: displays).map {
                     DisplaySwapOverlay.Snapshot(image: $0, order: move.order, from: move.from, to: move.to)
                 }

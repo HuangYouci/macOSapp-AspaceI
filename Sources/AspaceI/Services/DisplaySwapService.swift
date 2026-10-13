@@ -80,13 +80,14 @@ final class DisplaySwapService: Sendable {
 
     /// 只算不搬。只看目前畫面上看得到的視窗：最小化、全螢幕、其他桌面空間裡的視窗都留在原處。
     /// 每個 App 各自在一條執行緒上讀，總耗時取決於最慢的那個 App，而不是全部加總。
-    func plan(_ first: ConnectedDisplay, _ second: ConnectedDisplay, excluding ownPID: pid_t) -> DisplaySwapPlan {
+    /// `overrides` 指定的視窗（任務管理工作區裡的）不照比例換算，直接搬到指定位置；只在它本來就要被搬時才生效。
+    func plan(_ first: ConnectedDisplay, _ second: ConnectedDisplay, excluding ownPID: pid_t, overrides: [CGWindowID: CGRect] = [:]) -> DisplaySwapPlan {
         let apps = onScreenWindows(excluding: ownPID)
         let screens = [first.frame, second.frame]
         let visible = [first.visibleFrame, second.visibleFrame]
         let collector = LockedCollector<DisplaySwapPlan.AppMoves>()
         DispatchQueue.concurrentPerform(iterations: apps.count) { index in
-            if let moves = planWindows(of: apps[index].pid, onScreen: apps[index].windows, screens: screens, visible: visible) {
+            if let moves = planWindows(of: apps[index].pid, onScreen: apps[index].windows, screens: screens, visible: visible, overrides: overrides) {
                 collector.append(moves)
             }
         }
@@ -128,7 +129,13 @@ final class DisplaySwapService: Sendable {
         return onScreen.map { ($0.key, $0.value) }
     }
 
-    private func planWindows(of pid: pid_t, onScreen: [OnScreenWindow], screens: [CGRect], visible: [CGRect]) -> DisplaySwapPlan.AppMoves? {
+    private func planWindows(
+        of pid: pid_t,
+        onScreen: [OnScreenWindow],
+        screens: [CGRect],
+        visible: [CGRect],
+        overrides: [CGWindowID: CGRect]
+    ) -> DisplaySwapPlan.AppMoves? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
         guard let elements = AXWindow.attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return nil }
@@ -144,7 +151,8 @@ final class DisplaySwapService: Sendable {
         guard !targets.isEmpty else { return nil }
         let moves = targets.map { index, target in
             let listed = windows[index].listed
-            return (windows[index].element, PlannedWindowMove(windowNumber: listed.number, order: listed.order, from: listed.frame, to: target))
+            let destination = overrides[listed.number] ?? target
+            return (windows[index].element, PlannedWindowMove(windowNumber: listed.number, order: listed.order, from: listed.frame, to: destination))
         }
         return DisplaySwapPlan.AppMoves(app: app, windows: moves)
     }

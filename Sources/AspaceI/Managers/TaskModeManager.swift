@@ -336,6 +336,56 @@ final class TaskModeManager {
         }
     }
 
+    // MARK: 螢幕互換
+
+    /// 互換牽涉到任務管理所在的螢幕時，螢幕互換要一起處理的東西：側欄面板滑過去，工作區的視窗落在新螢幕的工作區。
+    struct SwapFollow {
+        let sidebar: PlannedWindowMove?
+        let targets: [CGWindowID: CGRect]
+    }
+
+    /// 互換沒有牽涉到任務管理所在的螢幕、或任務管理沒開時是 nil。
+    func swapFollow(_ first: ConnectedDisplay, _ second: ConnectedDisplay) -> SwapFollow? {
+        guard isActive, !isChanging, let current = activeDisplay,
+              let destination = Self.destination(of: current, first, second) else { return nil }
+        let frames = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, $0.frame) })
+        let sidebar = panel.windowID.map {
+            PlannedWindowMove(
+                windowNumber: $0,
+                order: -1,
+                from: TaskModeLayout.sidebarFrame(in: current.visibleFrame),
+                to: TaskModeLayout.sidebarFrame(in: destination.visibleFrame)
+            )
+        }
+        return SwapFollow(
+            sidebar: sidebar,
+            targets: TaskModeLayout.workspaceTargets(frames, from: current.visibleFrame, to: destination.visibleFrame)
+        )
+    }
+
+    /// 視窗已經搬好之後呼叫：側欄移到新螢幕，之後新開的視窗也放進新螢幕的工作區。
+    /// 只換這次開啟用的螢幕，設定裡選的螢幕不動，下次開啟仍在設定的那個。
+    func didSwap(_ first: ConnectedDisplay, _ second: ConnectedDisplay) async {
+        guard isActive, let current = activeDisplay,
+              let destination = Self.destination(of: current, first, second) else { return }
+        activeDisplay = destination
+        panel.move(to: TaskModeLayout.sidebarFrame(in: destination.visibleFrame))
+        originalFrames = TaskModeLayout.swappedFrames(
+            originalFrames,
+            screens: [first.frame, second.frame],
+            visible: [first.visibleFrame, second.visibleFrame]
+        )
+        await refresh()
+    }
+
+    private static func destination(of current: ConnectedDisplay, _ first: ConnectedDisplay, _ second: ConnectedDisplay) -> ConnectedDisplay? {
+        switch current.uuid {
+        case first.uuid: second
+        case second.uuid: first
+        default: nil
+        }
+    }
+
     private func screensChanged() {
         refreshDisplays()
         guard isActive, let activeDisplay else { return }
