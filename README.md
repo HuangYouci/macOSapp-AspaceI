@@ -76,9 +76,16 @@ App 有更新、或某個實例已經比其他的新時，該組會出現「更�
 - 快捷鍵至少要含 ⌘、⌥、⌃ 其中一個；錄製時按 ⎋ 取消、⌫ 清除。
 - 動畫需要「螢幕錄製」權限：AspaceI 只在按下互換時截兩個螢幕的畫面做滑動效果，不錄影、不存檔，動畫結束就丟掉。沒有權限時直接搬、沒有動畫。
 
+### 任務管理
+
+設定 > 一般 > 任務管理。選一個螢幕，左邊側欄列出所有正在跑的 Claude、Codex、Antigravity 視窗（即時縮圖、名稱、額度），右邊放大選中的那個；點側欄就切換。可錄一組快捷鍵開關。
+
+- 需要輔助使用權限；縮圖另需螢幕錄製權限，沒有時只顯示平台圖示。
+- 沒選中的視窗疊在工作區後面；結束時放回開啟前的位置。
+
 ### 設定
 
-- 一般：登入時開啟、螢幕互換
+- 一般：登入時開啟、螢幕互換、任務管理
 - Menu bar：額度類型、顯示的帳號
 - 資料：匯入／匯出帳號、匯出用量
 - 關於：作者、版本、價格表、隱私政策、使用條款
@@ -134,7 +141,8 @@ cp -R dist/AspaceI.app /Applications/
 | 用量歷史 | `~/Library/Application Support/AspaceI/usage-history.plist` |
 | 實例設定與資料夾 | `~/Library/Application Support/AspaceI/` |
 | 實例用的 App 複本 | `~/Library/Application Support/AspaceI/Apps.noindex/` |
-| 螢幕互換組合與快捷鍵 | `UserDefaults`：`displaySwapRules` |
+| 螢幕互換組合與快捷鍵 | `UserDefaults`：`displaySwapRules`、`displaySwapAnimates` |
+| 任務管理螢幕與快捷鍵 | `UserDefaults`：`taskModeDisplay`、`taskModeShortcut` |
 
 完整移除：結束 App、刪除 `/Applications/AspaceI.app` 與上述資料夾，並在「鑰匙圈存取」刪除 `com.huangyouci.AspaceI` 項目。
 

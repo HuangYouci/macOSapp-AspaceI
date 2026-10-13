@@ -11,8 +11,6 @@ final class DisplaySwapManager {
     private static let animatesKey = "displaySwapAnimates"
     /// 視窗搬完後 App 要一點時間在新位置畫好，太早淡出會看到還沒重畫的視窗。
     private static let redrawDelay: Duration = .milliseconds(90)
-    private static let escapeKeyCode: UInt16 = 53
-    private static let deleteKeyCode: UInt16 = 51
 
     private(set) var rules: [DisplaySwapRule] = []
     private(set) var displays: [ConnectedDisplay] = []
@@ -29,8 +27,7 @@ final class DisplaySwapManager {
     @ObservationIgnored private let service = DisplaySwapService.shared
     @ObservationIgnored private let snapshotService = WindowSnapshotService.shared
     @ObservationIgnored private let overlay = DisplaySwapOverlay()
-    @ObservationIgnored private let hotKeys = GlobalHotKeys()
-    @ObservationIgnored private var keyMonitor: Any?
+    @ObservationIgnored private let recorder = ShortcutRecorder()
     @ObservationIgnored private var screenObserver: NSObjectProtocol?
 
     init(defaults: UserDefaults = .standard) {
@@ -129,60 +126,26 @@ final class DisplaySwapManager {
 
     // MARK: 錄製快捷鍵
 
-    /// 錄製期間先拿掉所有熱鍵，否則按下已註冊的組合會直接觸發互換，錄不進來。
     func startRecording(_ ruleID: UUID) {
-        stopRecording()
-        hotKeys.removeAll()
+        recorder.stop()
         recordingRuleID = ruleID
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            // NSEvent 不能跨隔離區傳遞，先取出需要的值。
-            let keyCode = event.keyCode
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let characters = event.charactersIgnoringModifiers
-            let consumed = MainActor.assumeIsolated {
-                self?.handleRecording(keyCode: keyCode, flags: flags, characters: characters) ?? false
+        recorder.start { [weak self] outcome in
+            guard let self else { return }
+            recordingRuleID = nil
+            switch outcome {
+            case .recorded(let shortcut): setShortcut(shortcut, for: ruleID)
+            case .cleared: setShortcut(nil, for: ruleID)
+            case .cancelled: break
             }
-            return consumed ? nil : event
         }
     }
 
     func stopRecording() {
-        if let keyMonitor {
-            NSEvent.removeMonitor(keyMonitor)
-        }
-        keyMonitor = nil
-        guard recordingRuleID != nil else { return }
-        recordingRuleID = nil
-        registerHotKeys()
+        recorder.stop()
     }
 
     func clearShortcut(_ ruleID: UUID) {
         setShortcut(nil, for: ruleID)
-    }
-
-    /// 回傳 true 表示按鍵被錄製吃掉，不再往下傳給文字框或選單。
-    private func handleRecording(keyCode: UInt16, flags: NSEvent.ModifierFlags, characters: String?) -> Bool {
-        guard let ruleID = recordingRuleID else { return false }
-        let hasModifier = !flags.intersection([.command, .option, .control]).isEmpty
-        if !hasModifier && keyCode == Self.escapeKeyCode {
-            stopRecording()
-            return true
-        }
-        if !hasModifier && keyCode == Self.deleteKeyCode {
-            setShortcut(nil, for: ruleID)
-            stopRecording()
-            return true
-        }
-        let shortcut = KeyShortcut(
-            keyCode: UInt32(keyCode),
-            modifiers: Self.carbonModifiers(flags),
-            keyLabel: KeyShortcut.label(keyCode: UInt32(keyCode), characters: characters)
-        )
-        // 沒有 ⌘⌥⌃ 的組合會吃掉一般打字，繼續等下一個按鍵。
-        guard shortcut.isUsable else { return true }
-        setShortcut(shortcut, for: ruleID)
-        stopRecording()
-        return true
     }
 
     private func setShortcut(_ shortcut: KeyShortcut?, for ruleID: UUID) {
@@ -196,15 +159,6 @@ final class DisplaySwapManager {
         rules[index].shortcut = shortcut
         save()
         registerHotKeys()
-    }
-
-    private static func carbonModifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
-        var value: UInt32 = 0
-        if flags.contains(.command) { value |= KeyShortcut.command }
-        if flags.contains(.shift) { value |= KeyShortcut.shift }
-        if flags.contains(.option) { value |= KeyShortcut.option }
-        if flags.contains(.control) { value |= KeyShortcut.control }
-        return value
     }
 
     // MARK: 互換
@@ -280,14 +234,14 @@ final class DisplaySwapManager {
     }
 
     private func registerHotKeys() {
-        let items = rules.compactMap { rule -> (id: UUID, shortcut: KeyShortcut, action: () -> Void)? in
+        let items = rules.compactMap { rule -> GlobalHotKeys.Item? in
             guard let shortcut = rule.shortcut else { return nil }
             let id = rule.id
             return (id, shortcut, { [weak self] in
                 Task { await self?.swap(id) }
             })
         }
-        conflictedRuleIDs = hotKeys.replaceAll(items)
+        conflictedRuleIDs = GlobalHotKeys.shared.set("displaySwap", items)
     }
 
     private func save() {

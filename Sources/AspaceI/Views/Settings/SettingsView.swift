@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(AccountManager.self) private var accountManager
     @Environment(UsageManager.self) private var usageManager
     @Environment(DisplaySwapManager.self) private var displaySwapManager
+    @Environment(TaskModeManager.self) private var taskModeManager
     /// 二次確認交給 popup 外層呈現：MenuBarExtra 的面板收不到系統對話框的點擊。
     let confirm: (ConfirmationRequest) -> Void
     let onOpen: (Page) -> Void
@@ -35,6 +36,8 @@ struct SettingsView: View {
                 }
                 rowDivider
                 SettingsForm.navigationRow("螢幕互換", value: displaySwapSummary) { onOpen(.displaySwap) }
+                rowDivider
+                SettingsForm.navigationRow("任務管理", value: taskModeSummary) { onOpen(.taskMode) }
             }
 
             section("Menu bar") {
@@ -153,6 +156,10 @@ struct SettingsView: View {
         }
     }
 
+    private var taskModeSummary: String? {
+        taskModeManager.isActive ? "開啟中" : taskModeManager.shortcut?.displayString
+    }
+
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         SettingsForm.section(title, content: content)
     }
@@ -172,6 +179,7 @@ extension SettingsView {
     /// 設定的子頁，由 popup 外層負責切換，進出子頁時捲動位置從頂端開始。
     enum Page: Hashable {
         case displaySwap
+        case taskMode
         case menuBarAccounts
         case about
     }

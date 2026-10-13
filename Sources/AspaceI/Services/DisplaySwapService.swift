@@ -84,7 +84,7 @@ final class DisplaySwapService: Sendable {
         let apps = onScreenWindows(excluding: ownPID)
         let screens = [first.frame, second.frame]
         let visible = [first.visibleFrame, second.visibleFrame]
-        let collector = Collector<DisplaySwapPlan.AppMoves>()
+        let collector = LockedCollector<DisplaySwapPlan.AppMoves>()
         DispatchQueue.concurrentPerform(iterations: apps.count) { index in
             if let moves = planWindows(of: apps[index].pid, onScreen: apps[index].windows, screens: screens, visible: visible) {
                 collector.append(moves)
@@ -95,7 +95,7 @@ final class DisplaySwapService: Sendable {
 
     /// 各 App 同時搬。
     func execute(_ plan: DisplaySwapPlan) -> DisplaySwapResult {
-        let collector = Collector<DisplaySwapResult>()
+        let collector = LockedCollector<DisplaySwapResult>()
         DispatchQueue.concurrentPerform(iterations: plan.apps.count) { index in
             collector.append(execute(plan.apps[index]))
         }
@@ -131,12 +131,12 @@ final class DisplaySwapService: Sendable {
     private func planWindows(of pid: pid_t, onScreen: [OnScreenWindow], screens: [CGRect], visible: [CGRect]) -> DisplaySwapPlan.AppMoves? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-        guard let elements = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return nil }
+        guard let elements = AXWindow.attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return nil }
         var windows: [(element: AXUIElement, listed: OnScreenWindow)] = []
         for window in elements {
-            if (attribute(window, kAXMinimizedAttribute) as? Bool) == true { continue }
-            if (attribute(window, "AXFullScreen") as? Bool) == true { continue }
-            guard let frame = frame(of: window),
+            if (AXWindow.attribute(window, kAXMinimizedAttribute) as? Bool) == true { continue }
+            if (AXWindow.attribute(window, "AXFullScreen") as? Bool) == true { continue }
+            guard let frame = AXWindow.frame(of: window),
                   let listed = onScreen.first(where: { Self.matches($0.frame, frame) }) else { continue }
             windows.append((window, OnScreenWindow(number: listed.number, order: listed.order, frame: frame)))
         }
@@ -151,7 +151,7 @@ final class DisplaySwapService: Sendable {
 
     private func execute(_ moves: DisplaySwapPlan.AppMoves) -> DisplaySwapResult {
         // 輔助增強模式開著時（Finder、開過螢幕閱讀器的瀏覽器），App 會用動畫慢慢移過去，搬完再開回來。
-        let enhanced = (attribute(moves.app, Self.enhancedUserInterface) as? Bool) == true
+        let enhanced = (AXWindow.attribute(moves.app, Self.enhancedUserInterface) as? Bool) == true
         if enhanced {
             AXUIElementSetAttributeValue(moves.app, Self.enhancedUserInterface as CFString, kCFBooleanFalse)
         }
@@ -162,7 +162,7 @@ final class DisplaySwapService: Sendable {
         }
         var result = DisplaySwapResult()
         for window in moves.windows {
-            if move(window.element, from: window.move.from, to: window.move.to) {
+            if AXWindow.move(window.element, from: window.move.from, to: window.move.to) {
                 result.moved += 1
             } else {
                 result.failed += 1
@@ -174,67 +174,5 @@ final class DisplaySwapService: Sendable {
     private static func matches(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
         abs(lhs.minX - rhs.minX) <= matchTolerance && abs(lhs.minY - rhs.minY) <= matchTolerance
             && abs(lhs.width - rhs.width) <= matchTolerance && abs(lhs.height - rhs.height) <= matchTolerance
-    }
-
-    /// 每改一次大小 App 就重排一次畫面，呼叫越少越快：
-    /// 一樣大只移位置；變小先縮再移、變大先移再放，避免中途超出螢幕被 App 拒絕；長寬一增一減時才多補一次大小。
-    private func move(_ window: AXUIElement, from current: CGRect, to target: CGRect) -> Bool {
-        var size = target.size
-        var origin = target.origin
-        guard let sizeValue = AXValueCreate(.cgSize, &size),
-              let originValue = AXValueCreate(.cgPoint, &origin) else { return false }
-        let setSize = { AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue) }
-        let setPosition = { AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, originValue) }
-        if current.size == target.size {
-            return setPosition() == .success
-        }
-        let shrinks = target.width <= current.width && target.height <= current.height
-        let grows = target.width >= current.width && target.height >= current.height
-        if shrinks {
-            _ = setSize()
-            return setPosition() == .success
-        }
-        if grows {
-            let positionError = setPosition()
-            _ = setSize()
-            return positionError == .success
-        }
-        _ = setSize()
-        let positionError = setPosition()
-        _ = setSize()
-        return positionError == .success
-    }
-
-    private func frame(of window: AXUIElement) -> CGRect? {
-        guard let positionValue = attribute(window, kAXPositionAttribute),
-              let sizeValue = attribute(window, kAXSizeAttribute),
-              CFGetTypeID(positionValue) == AXValueGetTypeID(),
-              CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
-        var origin = CGPoint.zero
-        var size = CGSize.zero
-        // CF 型別無法用 as? 檢查，上面已比對過型別編號，這裡才轉。
-        guard AXValueGetValue(unsafeDowncast(positionValue, to: AXValue.self), .cgPoint, &origin),
-              AXValueGetValue(unsafeDowncast(sizeValue, to: AXValue.self), .cgSize, &size) else { return nil }
-        return CGRect(origin: origin, size: size)
-    }
-
-    private func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
-        return value
-    }
-}
-
-/// 各 App 的執行緒同時回報結果，用鎖保護。
-private final class Collector<Item>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: [Item] = []
-
-    var items: [Item] {
-        lock.withLock { storage }
-    }
-
-    func append(_ item: Item) {
-        lock.withLock { storage.append(item) }
     }
 }

@@ -19,6 +19,7 @@ struct AspaceIApp: App {
     @State private var settingsManager = SettingsManager()
     @State private var usageManager = UsageManager()
     @State private var displaySwapManager = DisplaySwapManager()
+    @State private var taskModeManager = TaskModeManager()
     @State private var loginManager: AccountLoginManager
 
     init() {
@@ -38,6 +39,7 @@ struct AspaceIApp: App {
                 .environment(loginManager)
                 .environment(usageManager)
                 .environment(displaySwapManager)
+                .environment(taskModeManager)
         } label: {
             MenuBarLabel(items: MenuBarQuotaItem.items(
                 accounts: accountManager.accounts,
@@ -56,6 +58,7 @@ struct AspaceIApp: App {
                 .task {
                     displaySwapManager.start()
                     instanceManager.startMonitoring(accounts: accountManager)
+                    taskModeManager.start(instances: instanceManager, accounts: accountManager)
                     await accountManager.autoImportLocalAccounts()
                     accountManager.startAutomaticRefresh()
                     usageManager.startAutomaticRefresh(instances: instanceManager)
