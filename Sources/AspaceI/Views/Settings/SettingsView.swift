@@ -4,8 +4,11 @@ struct SettingsView: View {
     @Environment(SettingsManager.self) private var settingsManager
     @Environment(AccountManager.self) private var accountManager
     @Environment(UsageManager.self) private var usageManager
+    @Environment(DisplaySwapManager.self) private var displaySwapManager
+    @Environment(TaskModeManager.self) private var taskModeManager
     /// 二次確認交給 popup 外層呈現：MenuBarExtra 的面板收不到系統對話框的點擊。
     let confirm: (ConfirmationRequest) -> Void
+    let onOpen: (Page) -> Void
     @State private var exportDocument: AccountExportDocument?
     @State private var showsImporter = false
     @State private var usageExport: AccountExportDocument?
@@ -31,9 +34,13 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
                 }
+                rowDivider
+                SettingsForm.navigationRow("螢幕互換", value: displaySwapSummary) { onOpen(.displaySwap) }
+                rowDivider
+                SettingsForm.navigationRow("任務管理", value: taskModeSummary) { onOpen(.taskMode) }
             }
 
-            section("Menu bar", trailing: "\(settingsManager.menuBarAccountIDs.count)") {
+            section("Menu bar") {
                 row {
                     Text("額度")
                     Spacer()
@@ -50,19 +57,10 @@ struct SettingsView: View {
                     .fixedSize()
                 }
                 rowDivider
-                if accountManager.accounts.isEmpty {
-                    row {
-                        Text("尚未加入帳號")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                ForEach(Array(accountManager.accounts.enumerated()), id: \.element.id) { index, account in
-                    if index > 0 { rowDivider }
-                    menuBarRow(account)
-                }
+                SettingsForm.navigationRow("顯示的帳號", value: "\(settingsManager.menuBarAccountIDs.count)") { onOpen(.menuBarAccounts) }
             }
 
-            section("帳號備份") {
+            section("資料") {
                 row {
                     Text("匯入帳號")
                     Spacer()
@@ -88,9 +86,7 @@ struct SettingsView: View {
                     }
                     .disabled(accountManager.accounts.isEmpty)
                 }
-            }
-
-            section("用量") {
+                rowDivider
                 row {
                     Text("匯出用量")
                     Spacer()
@@ -110,51 +106,13 @@ struct SettingsView: View {
                         usageExport = nil
                     }
                 }
-                if let source = URL(string: UsagePricing.bundled.table.source) {
-                    rowDivider
-                    Link(destination: source) {
-                        row {
-                            Text("價格表")
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text("LiteLLM · \(UsagePricing.bundled.table.fetchedAt)")
-                                .foregroundStyle(.secondary)
-                            Image(systemName: "arrow.up.right")
-                                .font(.scaled(.caption))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
             }
 
-            section("關於") {
-                row {
-                    Text("作者")
-                    Spacer()
-                    Text("Huang Youci")
-                        .foregroundStyle(.secondary)
-                }
-                rowDivider
-                row {
-                    Text("版本")
-                    Spacer()
-                    Text("26.10.12")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                if let privacyURL = URL(string: "https://huangyouci.com/privacy") {
-                    rowDivider
-                    linkRow("隱私政策", url: privacyURL)
-                }
-                if let termsURL = URL(string: "https://huangyouci.com/terms") {
-                    rowDivider
-                    linkRow("使用條款", url: termsURL)
-                }
+            SettingsForm.card {
+                SettingsForm.navigationRow("關於", value: Self.version) { onOpen(.about) }
             }
 
-            card {
+            SettingsForm.card {
                 Button {
                     NSApplication.shared.terminate(nil)
                 } label: {
@@ -189,83 +147,40 @@ struct SettingsView: View {
         }
     }
 
-    private func menuBarRow(_ account: Account) -> some View {
-        let shown = settingsManager.isShownInMenuBar(account.id)
-        return Button {
-            settingsManager.setMenuBar(account.id, shown: !shown)
-        } label: {
-            row {
-                PlatformBadge(platform: account.platform, size: 22)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(account.label)
-                        .lineLimit(1)
-                    Text(account.platform.displayName)
-                        .font(.scaled(.caption))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: shown ? "checkmark.circle.fill" : "circle")
-                    .font(.scaled(.title3))
-                    .foregroundStyle(shown ? Color.accentColor : Color.secondary.opacity(0.5))
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func linkRow(_ title: String, url: URL) -> some View {
-        Link(destination: url) {
-            row {
-                Text(title)
-                    .foregroundStyle(.primary)
-                Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.scaled(.caption))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func section<Content: View>(_ title: String, trailing: String? = nil, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                    .font(.scaled(.caption, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let trailing {
-                    Text(trailing)
-                        .font(.scaled(.caption))
-                        .monospacedDigit()
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 6)
-            card(content)
+    /// 只有一組時直接顯示它的快捷鍵，多組時顯示組數。
+    private var displaySwapSummary: String? {
+        switch displaySwapManager.rules.count {
+        case 0: nil
+        case 1: displaySwapManager.rules.first?.shortcut?.displayString
+        default: "\(displaySwapManager.rules.count)"
         }
     }
 
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
+    private var taskModeSummary: String? {
+        taskModeManager.isActive ? "開啟中" : taskModeManager.shortcut?.displayString
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        SettingsForm.section(title, content: content)
     }
 
     private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        HStack(spacing: 10) {
-            content()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+        SettingsForm.row(content)
     }
 
     private var rowDivider: some View {
-        Divider()
-            .padding(.leading, 14)
+        SettingsForm.divider
+    }
+}
+
+extension SettingsView {
+    static let version = "26.10.12"
+
+    /// 設定的子頁，由 popup 外層負責切換，進出子頁時捲動位置從頂端開始。
+    enum Page: Hashable {
+        case displaySwap
+        case taskMode
+        case menuBarAccounts
+        case about
     }
 }

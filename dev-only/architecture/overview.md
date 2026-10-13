@@ -1,12 +1,50 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-10-12
+最後更新日期：2026-10-13
 
-對應功能／commit：移除 GitHub Copilot；用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：任務管理模式（設定 > 一般）、螢幕互換（設定 > 一般）、設定頁收成二級頁；移除 GitHub Copilot；用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 移除 GitHub Copilot（2026-10-12 決策）
 
 負責人判斷 Copilot 不值得維護，連同 GitHub 裝置碼登入、`gh auth token` 匯入、`copilot_internal` 額度、VS Code 實例一起移除。舊資料：`accounts.json` 與 `instances.json` 改為逐筆讀，平台解不出來的略過（`AccountStore.decode`、`StoredInstance`），GitHub 帳號在 Keychain 裡的 token 於載入時刪除；VS Code 實例的資料夾與複本留在原處不動。下文提到 VS Code 的實測（IPC socket 路徑長度、引號排除、quarantine）是當時的紀錄，規則仍適用於其他 Electron App。
+
+## 螢幕互換（2026-10-13）
+
+負責人在多個螢幕之間對調 AI 工具的視窗，選兩個螢幕、錄快捷鍵，按下去兩邊的視窗整批對調。歸在 AspaceI 是因為它服務的是 AI 工具的工作區，且負責人不想為此多裝一個常駐 App（Hammerspoon 等工具被否決：權限一樣大、又多一個要維護的 App）。
+
+- 分工：`DisplaySwapManager`（組合、快捷鍵註冊、錄製、執行）→ `DisplaySwapService`（Accessibility 讀寫視窗）；座標換算在 `DisplaySwapGeometry`，純函式、有單元測試。
+- 螢幕以 `CGDisplayCreateUUIDFromDisplayID` 的 UUID 存，`CGDirectDisplayID` 重新接線會換號。螢幕名稱一起存，沒接上時設定頁仍認得出是哪一台。
+- 只搬「看得到」的視窗：先用 `CGWindowListCopyWindowInfo(.optionOnScreenOnly)` 拿第 0 層的視窗外框，再只留 Accessibility 視窗裡外框對得上的。單用 Accessibility 會拿到其他桌面空間與隱藏的視窗。最小化與 `AXFullScreen` 一律跳過。
+- 視窗歸屬看與螢幕重疊面積最大的那一個，不看中心點。兩邊先分好再一起搬，搬過去的不會被搬回來。換算用兩個螢幕的可用範圍（扣選單列、Dock）等比縮放並收進邊界，佔滿的視窗換過去仍佔滿。
+- 速度（2026-10-13 負責人反映太慢後調整）：讀取本身不慢（實測 9 個 App 合計約 0.4 秒），慢在搬動。Electron App 每改一次大小就重排一次畫面，所以呼叫越少越好：一樣大只移位置；變小先縮再移、變大先移再放（避免中途超出螢幕被拒）；長寬一增一減才用大小 → 位置 → 大小。各 App 用 `concurrentPerform` 同時讀與搬，總耗時取決於最慢的那一個。`AXEnhancedUserInterface` 開著的 App（實測 Finder）會用動畫慢慢移，搬動期間暫時關掉、搬完開回來（沿用 Rectangle 的做法）。
+- 單一 App 的 Accessibility 呼叫逾時 0.3 秒，卡住的 App 不會拖住整次互換。
+- 動畫（預設開，需「螢幕錄製」權限，沒權限或截圖失敗就直接搬）：macOS 不能讓別的 App 的視窗平滑移動，逐格改位置會讓每個 App 每格重排，所以用截圖做（`WindowSnapshotService` → `DisplaySwapOverlay`）。流程：規劃 → 每個螢幕截「完整畫面」與「拿掉要搬的視窗」兩張 → 蓋上與畫面相同的覆蓋層 → 截圖滑到新位置（0.32 秒）→ 底下搬真視窗 → 淡出。
+  - 只截整個螢幕再切出各視窗：一個視窗一張要約 0.2 秒（7 個並行），整個螢幕一張約 0.04 秒（2026-10-13 實測）。切出的圖在重疊處會帶到前面視窗的內容，但同一螢幕的視窗搬過去相對位置不變，那一塊會被前面視窗的截圖蓋住。
+  - 動畫播完才搬真視窗。同時搬時錄影看得到動畫掉格、最後一格直接跳到終點；搬動期間覆蓋層停在最終畫面。實測按下到看起來換好約 0.5 秒，到真視窗就位、淡出完約 1 秒。
+  - 每個螢幕各一個覆蓋視窗（「每個螢幕有獨立桌面空間」開著時一個視窗跨不了兩個螢幕），同一張截圖放進兩個覆蓋視窗、走同一條全域座標路徑，各自只畫得出自己那一段。
+  - 覆蓋視窗的圖層要自己建好再設給 view（`view.layer = root` 再 `wantsLayer = true`）。只開 `wantsLayer` 時 view 放進視窗前 `view.layer` 是 nil，圖層加不上去，覆蓋層是空的，但 CA 動畫照樣計時跑完，從回呼完全看不出問題。
+  - 覆蓋視窗 `sharingType = .none`，不會被截圖或錄影錄到；要錄影驗證動畫時暫時改成 `.readOnly`。
+  - 緩動用 (0.4, 0, 0.2, 1)。(0.25, 0.9, 0.3, 1) 前三格就走完八成、尾巴拖很長，看起來像卡住。
+  - 截圖功能第一次用要多花約 0.2 秒啟動，App 啟動時先暖機。螢幕錄製權限允許後要重新開 App 才生效。
+- 快捷鍵用 Carbon `RegisterEventHotKey`（`GlobalHotKeys.shared`，各功能一個群組）：不需輔助使用權限、App 不在前景也收得到。註冊失敗通常是被別的 App 或另一個群組先註冊走，設定頁標示。錄製（`ShortcutRecorder`）期間先撤掉全部熱鍵，否則按下已註冊的組合會被系統直接攔走、錄不進來。錄製用 `NSEvent` 本機監聽，只在 popup 開著時有效。
+- 快捷鍵觸發時 popup 通常沒開，失敗（螢幕沒接、沒有權限）時同時發出提示音。
+- 輔助使用授權沒有通知，子頁開著時每秒查一次。權限綁簽章，`build-app.sh` 用固定的 Apple Development 憑證簽，重新建置不會失效；改用 ad-hoc 簽章就要重新允許。
+
+## 任務管理（2026-10-13）
+
+選一個螢幕，左邊窄側欄（最寬 220pt、最多佔可用寬度兩成）列出所有正在跑的 Claude／Codex／Antigravity 視窗，每列是即時縮圖、名稱（帳號短名，沒帳號用實例名）、額度；右邊工作區放選中的視窗。以設定頁開關或快捷鍵切換。
+
+- 分工：`TaskModeManager`（開關、定時更新、選取、還原）→ `TaskWindowService`（掃描與搬動）；版面 `TaskModeLayout`（純函式、有測試）；側欄 `TaskSidebarView`（純展示）由 `TaskSidebarHost` 接上管理器，放在 `TaskSidebarPanel`（不搶焦點的浮動面板）；縮圖 `WindowThumbnailCapturer`。
+- 哪些視窗屬於 AI 工具：用 `InstanceManager.runningProcessIDs`（含預設實例）。它靠 `ps` 判定、要 0.5 到 3 秒，只在開啟時、以及有 App 開啟或結束時重抓。帳號用 `InstanceManager.currentAccount`。
+- 沒選中的視窗疊在工作區後面（負責人選的，不最小化：切換是瞬間的、Dock 不會塞滿）。切換＝把視窗拉到最前並叫起它的 App。
+- 每 1.5 秒重掃一次：只把新出現的視窗放進工作區，已接手的視窗使用者自己挪了就不再動。選中的那格跟著實際最上層的 AI 視窗走，所以從別處切過去側欄也會跟上。側欄依平台與名稱固定排序，不跟疊放順序，否則每次切換整排都會跳。
+- 結束時把視窗放回開始前的位置（只還原開啟期間接手、現在還在的視窗）。選的螢幕被拔掉時自動結束。
+- 縮圖：每個視窗一條 ScreenCaptureKit 串流（每秒 3 格、寬 200pt），被蓋住的視窗也拿得到畫面。需要螢幕錄製權限，沒有就顯示平台圖示。開啟時不主動要權限：每次都跳出系統設定會打斷使用者，而且開啟流程會卡到系統設定關掉，這段期間的快捷鍵都被忽略（2026-10-13 實測）。
+- 快捷鍵與錄製和螢幕互換共用 `GlobalHotKeys.shared`（各功能一個群組，錄製時整個暫停）與 `ShortcutRecorder`；Accessibility 讀寫共用 `AXWindow`。
+
+## 設定頁結構
+
+設定主頁只放常用項目，其餘收進子頁（`SettingsView.Page`：螢幕互換、任務管理、顯示的帳號、關於），由 `MenuBarContentView` 切換，每個子頁各自一個捲動區；在設定分頁時再點一次「設定」回到主頁。版面元件共用 `SettingsForm`。帳號清單會隨帳號數變長，所以「顯示的帳號」移到子頁；價格表來源移到「關於」。
 
 ## 邊界
 

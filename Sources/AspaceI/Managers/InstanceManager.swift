@@ -263,6 +263,18 @@ final class InstanceManager {
         }
     }
 
+    /// 實例現在用的帳號：Claude 看實際登入的帳號；其他平台看綁定，預設實例沒綁定時用官方 App 目前的帳號。
+    func currentAccount(for instance: Instance, accounts: AccountManager) -> Account? {
+        if instance.platform == .claude {
+            guard let uuid = signedInAccountUUIDs[instance.id] else { return nil }
+            return accounts.accounts.first { $0.platform == .claude && $0.accountUUID == uuid }
+        }
+        if let accountID = instance.accountID {
+            return accounts.accounts.first { $0.id == accountID }
+        }
+        return isDefault(instance) ? accounts.defaultClientAccount(for: instance.platform) : nil
+    }
+
     private func account(for instance: Instance, accounts: AccountManager) -> Account? {
         if instance.platform == .claude {
             guard let uuid = service.claudeSignedInAccountUUID(for: instance, isDefault: false) else { return nil }

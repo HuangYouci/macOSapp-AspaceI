@@ -9,6 +9,7 @@ struct MenuBarContentView: View {
     @State private var editor: Editor?
     @State private var confirmation: ConfirmationRequest?
     @State private var usageRange = UsageRange.today
+    @State private var settingsPage: SettingsView.Page?
 
     /// popup 四周的留白。留白放在捲動區裡面，捲動區本身貼齊 popup 四邊，邊緣也捲得到。
     private static let inset: CGFloat = 14
@@ -77,7 +78,18 @@ struct MenuBarContentView: View {
             case .instances:
                 scrollPage { InstanceListView(onAdd: { editor = .instance($0) }, confirm: { confirmation = $0 }) }
             case .settings:
-                scrollPage { SettingsView(confirm: { confirmation = $0 }) }
+                switch settingsPage {
+                case .displaySwap:
+                    scrollPage { SettingsView.DisplaySwapPage { settingsPage = nil } }
+                case .taskMode:
+                    scrollPage { SettingsView.TaskModePage { settingsPage = nil } }
+                case .menuBarAccounts:
+                    scrollPage { SettingsView.MenuBarAccountsPage { settingsPage = nil } }
+                case .about:
+                    scrollPage { SettingsView.AboutPage { settingsPage = nil } }
+                case nil:
+                    scrollPage { SettingsView(confirm: { confirmation = $0 }, onOpen: { settingsPage = $0 }) }
+                }
             }
         }
     }
@@ -202,6 +214,9 @@ struct MenuBarContentView: View {
 
     private func tabButton(_ section: Section) -> some View {
         Button {
+            if section == .settings && selection == .settings {
+                settingsPage = nil
+            }
             selection = section
         } label: {
             HStack(spacing: 4) {
