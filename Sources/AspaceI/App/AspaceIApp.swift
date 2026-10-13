@@ -56,7 +56,7 @@ struct AspaceIApp: App {
                     Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .task {
-                    displaySwapManager.start()
+                    displaySwapManager.start(taskMode: taskModeManager)
                     instanceManager.startMonitoring(accounts: accountManager)
                     taskModeManager.start(instances: instanceManager, accounts: accountManager)
                     await accountManager.autoImportLocalAccounts()

@@ -78,4 +78,23 @@ struct TaskModeTests {
         let none = TaskModeManager.resolveSelection(front: 3, pending: nil, now: now, current: current)
         #expect(none.selection == 3)
     }
+
+    @Test("互換時還在工作區的視窗直接落在新螢幕的工作區，使用者挪過的不算")
+    func workspaceTargetsFollowSwap() {
+        let inWorkspace = TaskModeLayout.mainFrame(in: laptop).offsetBy(dx: 1, dy: 0)
+        let moved = CGRect(x: 100, y: 100, width: 600, height: 400)
+        let targets = TaskModeLayout.workspaceTargets([1: inWorkspace, 2: moved], from: laptop, to: wide)
+        #expect(targets == [1: TaskModeLayout.mainFrame(in: wide)])
+    }
+
+    @Test("互換後要還原的位置也換到另一個螢幕，兩邊都不在的不動")
+    func originalFramesFollowSwap() {
+        let laptopScreen = CGRect(x: 0, y: 0, width: 1452, height: 982)
+        let wideScreen = CGRect(x: -515, y: -1440, width: 2560, height: 1440)
+        let elsewhere = CGRect(x: 5000, y: 0, width: 300, height: 300)
+        let original: [CGWindowID: CGRect] = [1: laptop, 2: elsewhere]
+        let swapped = TaskModeLayout.swappedFrames(original, screens: [laptopScreen, wideScreen], visible: [laptop, wide])
+        #expect(swapped[1] == wide)
+        #expect(swapped[2] == elsewhere)
+    }
 }
