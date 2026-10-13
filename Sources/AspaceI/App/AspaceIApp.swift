@@ -18,6 +18,7 @@ struct AspaceIApp: App {
     @State private var instanceManager = InstanceManager()
     @State private var settingsManager = SettingsManager()
     @State private var usageManager = UsageManager()
+    @State private var displaySwapManager = DisplaySwapManager()
     @State private var loginManager: AccountLoginManager
 
     init() {
@@ -36,6 +37,7 @@ struct AspaceIApp: App {
                 .environment(settingsManager)
                 .environment(loginManager)
                 .environment(usageManager)
+                .environment(displaySwapManager)
         } label: {
             MenuBarLabel(items: MenuBarQuotaItem.items(
                 accounts: accountManager.accounts,
@@ -52,6 +54,7 @@ struct AspaceIApp: App {
                     Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .task {
+                    displaySwapManager.start()
                     instanceManager.startMonitoring(accounts: accountManager)
                     await accountManager.autoImportLocalAccounts()
                     accountManager.startAutomaticRefresh()

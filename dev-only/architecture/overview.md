@@ -1,12 +1,30 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-10-12
+最後更新日期：2026-10-13
 
-對應功能／commit：移除 GitHub Copilot；用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：螢幕互換（設定 > 一般）、設定頁收成二級頁；移除 GitHub Copilot；用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 移除 GitHub Copilot（2026-10-12 決策）
 
 負責人判斷 Copilot 不值得維護，連同 GitHub 裝置碼登入、`gh auth token` 匯入、`copilot_internal` 額度、VS Code 實例一起移除。舊資料：`accounts.json` 與 `instances.json` 改為逐筆讀，平台解不出來的略過（`AccountStore.decode`、`StoredInstance`），GitHub 帳號在 Keychain 裡的 token 於載入時刪除；VS Code 實例的資料夾與複本留在原處不動。下文提到 VS Code 的實測（IPC socket 路徑長度、引號排除、quarantine）是當時的紀錄，規則仍適用於其他 Electron App。
+
+## 螢幕互換（2026-10-13）
+
+負責人在多個螢幕之間對調 AI 工具的視窗，選兩個螢幕、錄快捷鍵，按下去兩邊的視窗整批對調。歸在 AspaceI 是因為它服務的是 AI 工具的工作區，且負責人不想為此多裝一個常駐 App（Hammerspoon 等工具被否決：權限一樣大、又多一個要維護的 App）。
+
+- 分工：`DisplaySwapManager`（組合、快捷鍵註冊、錄製、執行）→ `DisplaySwapService`（Accessibility 讀寫視窗）；座標換算在 `DisplaySwapGeometry`，純函式、有單元測試。
+- 螢幕以 `CGDisplayCreateUUIDFromDisplayID` 的 UUID 存，`CGDirectDisplayID` 重新接線會換號。螢幕名稱一起存，沒接上時設定頁仍認得出是哪一台。
+- 只搬「看得到」的視窗：先用 `CGWindowListCopyWindowInfo(.optionOnScreenOnly)` 拿第 0 層的視窗外框，再只留 Accessibility 視窗裡外框對得上的。單用 Accessibility 會拿到其他桌面空間與隱藏的視窗。最小化與 `AXFullScreen` 一律跳過。
+- 視窗歸屬看與螢幕重疊面積最大的那一個，不看中心點。兩邊先分好再一起搬，搬過去的不會被搬回來。換算用兩個螢幕的可用範圍（扣選單列、Dock）等比縮放並收進邊界，佔滿的視窗換過去仍佔滿。
+- 搬動順序是大小 → 位置 → 大小：從大螢幕搬到小螢幕時，部分 App 會拒絕先放大或先移到會超出邊界的位置。
+- 單一 App 的 Accessibility 呼叫逾時 0.3 秒，卡住的 App 不會拖住整次互換。搬動在背景執行緒做。
+- 快捷鍵用 Carbon `RegisterEventHotKey`：不需輔助使用權限、App 不在前景也收得到。註冊失敗通常是被別的 App 先註冊走，設定頁標示。錄製期間先撤掉全部熱鍵，否則按下已註冊的組合會直接觸發互換。錄製用 `NSEvent` 本機監聽，只在 popup 開著時有效。
+- 快捷鍵觸發時 popup 通常沒開，失敗（螢幕沒接、沒有權限）時同時發出提示音。
+- 輔助使用授權沒有通知，子頁開著時每秒查一次。權限綁簽章，`build-app.sh` 用固定的 Apple Development 憑證簽，重新建置不會失效；改用 ad-hoc 簽章就要重新允許。
+
+## 設定頁結構
+
+設定主頁只放常用項目，其餘收進子頁（`SettingsView.Page`：螢幕互換、顯示的帳號、關於），由 `MenuBarContentView` 切換，每個子頁各自一個捲動區；在設定分頁時再點一次「設定」回到主頁。版面元件共用 `SettingsForm`。帳號清單會隨帳號數變長，所以「顯示的帳號」移到子頁；價格表來源移到「關於」。
 
 ## 邊界
 

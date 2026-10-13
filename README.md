@@ -67,11 +67,20 @@ App 有更新、或某個實例已經比其他的新時，該組會出現「更�
 
 實例資料位於 `~/Library/Application Support/AspaceI/Instances/`。
 
+### 螢幕互換
+
+設定 > 一般 > 螢幕互換。選兩個螢幕、錄一組快捷鍵，按下去兩邊的視窗整批對調；位置與大小依兩個螢幕的可用範圍等比換算。可以設定多組（例如三個螢幕兩兩互換）。
+
+- 需要在「系統設定 > 隱私權與安全性 > 輔助使用」允許 AspaceI。
+- 只搬目前畫面上看得到的視窗；最小化、全螢幕、其他桌面空間裡的視窗留在原處。
+- 快捷鍵至少要含 ⌘、⌥、⌃ 其中一個；錄製時按 ⎋ 取消、⌫ 清除。
+
 ### 設定
 
-- 登入時開啟
-- 勾選顯示在選單列的帳號（最多 3 個）
-- 匯入／匯出帳號
+- 一般：登入時開啟、螢幕互換
+- Menu bar：額度類型、顯示的帳號
+- 資料：匯入／匯出帳號、匯出用量
+- 關於：作者、版本、價格表、隱私政策、使用條款
 
 ## 安裝
 
@@ -124,6 +133,7 @@ cp -R dist/AspaceI.app /Applications/
 | 用量歷史 | `~/Library/Application Support/AspaceI/usage-history.plist` |
 | 實例設定與資料夾 | `~/Library/Application Support/AspaceI/` |
 | 實例用的 App 複本 | `~/Library/Application Support/AspaceI/Apps.noindex/` |
+| 螢幕互換組合與快捷鍵 | `UserDefaults`：`displaySwapRules` |
 
 完整移除：結束 App、刪除 `/Applications/AspaceI.app` 與上述資料夾，並在「鑰匙圈存取」刪除 `com.huangyouci.AspaceI` 項目。
 
