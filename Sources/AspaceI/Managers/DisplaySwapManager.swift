@@ -1,11 +1,16 @@
 import AppKit
 import Observation
+import os
 
 /// 螢幕互換：保存要互換的螢幕組合、註冊各組的快捷鍵、執行互換。
 @MainActor
 @Observable
 final class DisplaySwapManager {
+    private static let logger = Logger(subsystem: "com.huangyouci.AspaceI", category: "DisplaySwap")
     private static let rulesKey = "displaySwapRules"
+    private static let animatesKey = "displaySwapAnimates"
+    /// 視窗搬完後 App 要一點時間在新位置畫好，太早淡出會看到還沒重畫的視窗。
+    private static let redrawDelay: Duration = .milliseconds(90)
     private static let escapeKeyCode: UInt16 = 53
     private static let deleteKeyCode: UInt16 = 51
 
@@ -16,16 +21,21 @@ final class DisplaySwapManager {
     /// 快捷鍵已被其他 App 註冊走、這裡註冊不到的組合。
     private(set) var conflictedRuleIDs: Set<UUID> = []
     private(set) var isSwapping = false
+    private(set) var animates = true
+    private(set) var canCaptureScreen = false
     var errorMessage: String?
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let service = DisplaySwapService.shared
+    @ObservationIgnored private let snapshotService = WindowSnapshotService.shared
+    @ObservationIgnored private let overlay = DisplaySwapOverlay()
     @ObservationIgnored private let hotKeys = GlobalHotKeys()
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var screenObserver: NSObjectProtocol?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        animates = defaults.object(forKey: Self.animatesKey) as? Bool ?? true
         if let data = defaults.data(forKey: Self.rulesKey) {
             do {
                 rules = try JSONDecoder().decode([DisplaySwapRule].self, from: data)
@@ -40,6 +50,7 @@ final class DisplaySwapManager {
         refreshDisplays()
         refreshTrust()
         registerHotKeys()
+        warmUpCapture()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -56,6 +67,28 @@ final class DisplaySwapManager {
     /// 授權結果沒有通知可以聽，畫面開著時定期呼叫。
     func refreshTrust() {
         isTrusted = service.isTrusted(prompt: false)
+        canCaptureScreen = snapshotService.hasPermission()
+    }
+
+    /// 截圖功能第一次用要多花約 0.2 秒啟動，App 開著時先暖好，第一次按快捷鍵才不會特別慢。
+    private func warmUpCapture() {
+        guard animates, snapshotService.hasPermission() else { return }
+        let service = snapshotService
+        Task.detached(priority: .background) {
+            await service.warmUp()
+        }
+    }
+
+    func setAnimates(_ enabled: Bool) {
+        animates = enabled
+        defaults.set(enabled, forKey: Self.animatesKey)
+        if enabled && !snapshotService.hasPermission() {
+            requestScreenCapture()
+        }
+    }
+
+    func requestScreenCapture() {
+        canCaptureScreen = snapshotService.requestPermission()
     }
 
     /// 跳出系統的授權提示，並打開「輔助使用」設定。
@@ -198,10 +231,46 @@ final class DisplaySwapManager {
         defer { isSwapping = false }
         let service = self.service
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        let result = await Task.detached {
-            service.swap(first, second, excluding: ownPID)
+        let plan = await Task.detached {
+            service.plan(first, second, excluding: ownPID)
         }.value
+        guard !plan.moves.isEmpty else { return }
+
+        await showOverlay(for: plan, displays: [first, second])
+        let result = await Task.detached {
+            service.execute(plan)
+        }.value
+        if overlay.isShowing {
+            try? await Task.sleep(for: Self.redrawDelay)
+            await overlay.dismiss()
+        }
         errorMessage = result.failed > 0 ? "\(result.failed) 個視窗搬不動" : nil
+    }
+
+    /// 截圖失敗或沒有權限時不蓋，直接搬，互換本身不受影響。
+    /// 動畫播完才搬真的視窗：同時搬的話視窗伺服器忙不過來，動畫會掉格、最後直接跳到終點（2026-10-13 錄影實測）。
+    /// 搬動期間覆蓋層停在最終畫面，看起來已經換好了。
+    private func showOverlay(for plan: DisplaySwapPlan, displays: [ConnectedDisplay]) async {
+        guard animates, snapshotService.hasPermission() else { return }
+        let snapshots: DisplaySnapshots
+        do {
+            snapshots = try await snapshotService.capture(displays: displays, hiding: Set(plan.moves.map(\.windowNumber)))
+        } catch {
+            Self.logger.error("截圖失敗，改為直接搬：\(error.localizedDescription, privacy: .public)")
+            return
+        }
+        overlay.show(
+            displays: displays,
+            backgrounds: snapshots.backgrounds,
+            snapshots: plan.moves.compactMap { move in
+                snapshots.window(move.from, on: displays).map {
+                    DisplaySwapOverlay.Snapshot(image: $0, order: move.order, from: move.from, to: move.to)
+                }
+            }
+        )
+        // 先讓蓋上去的那一格畫出來，再開始動畫。
+        try? await Task.sleep(for: .milliseconds(16))
+        await overlay.animate()
     }
 
     /// 快捷鍵觸發時 popup 通常沒開，看不到訊息，所以同時發出提示音。

@@ -3,10 +3,12 @@ import ApplicationServices
 
 /// 目前接上的螢幕。座標都已換成左上角為原點的全域座標，與 Accessibility 一致。
 struct ConnectedDisplay: Hashable, Sendable {
+    let displayID: CGDirectDisplayID
     let uuid: String
     let name: String
     let frame: CGRect
     let visibleFrame: CGRect
+    let scale: CGFloat
 
     var reference: DisplayReference { DisplayReference(uuid: uuid, name: name) }
 }
@@ -14,6 +16,31 @@ struct ConnectedDisplay: Hashable, Sendable {
 struct DisplaySwapResult: Sendable {
     var moved = 0
     var failed = 0
+}
+
+/// 要搬的一個視窗。`windowNumber` 對應視窗清單與 ScreenCaptureKit 的編號，`order` 越小越在前面。
+struct PlannedWindowMove: Sendable {
+    let windowNumber: CGWindowID
+    let order: Int
+    let from: CGRect
+    let to: CGRect
+}
+
+/// 讀完、算好但還沒搬的結果。裡面握著 Accessibility 物件，只在 `DisplaySwapService` 內使用，
+/// 外面只看 `moves`；建立後不再修改，跨執行緒傳遞是安全的。
+final class DisplaySwapPlan: @unchecked Sendable {
+    fileprivate struct AppMoves {
+        let app: AXUIElement
+        let windows: [(element: AXUIElement, move: PlannedWindowMove)]
+    }
+
+    fileprivate let apps: [AppMoves]
+    let moves: [PlannedWindowMove]
+
+    fileprivate init(apps: [AppMoves]) {
+        self.apps = apps
+        moves = apps.flatMap { $0.windows.map(\.move) }
+    }
 }
 
 /// 透過 Accessibility 搬其他 App 的視窗。需要使用者在「隱私權與安全性 > 輔助使用」允許 AspaceI。
@@ -41,71 +68,101 @@ final class DisplaySwapService: Sendable {
                   let uuid = CFUUIDCreateString(nil, cfUUID) as String? else { return nil }
             let visible = screen.visibleFrame
             return ConnectedDisplay(
+                displayID: displayID,
                 uuid: uuid,
                 name: screen.localizedName,
                 frame: CGDisplayBounds(displayID),
-                visibleFrame: CGRect(x: visible.minX, y: primaryHeight - visible.maxY, width: visible.width, height: visible.height)
+                visibleFrame: CGRect(x: visible.minX, y: primaryHeight - visible.maxY, width: visible.width, height: visible.height),
+                scale: screen.backingScaleFactor
             )
         }
     }
 
-    /// 只搬目前畫面上看得到的視窗：最小化、全螢幕、其他桌面空間裡的視窗都留在原處。
-    /// 每個 App 各自在一條執行緒上讀與搬，總耗時取決於最慢的那個 App，而不是全部加總。
-    func swap(_ first: ConnectedDisplay, _ second: ConnectedDisplay, excluding ownPID: pid_t) -> DisplaySwapResult {
-        let apps = onScreenFrames(excluding: ownPID)
+    /// 只算不搬。只看目前畫面上看得到的視窗：最小化、全螢幕、其他桌面空間裡的視窗都留在原處。
+    /// 每個 App 各自在一條執行緒上讀，總耗時取決於最慢的那個 App，而不是全部加總。
+    func plan(_ first: ConnectedDisplay, _ second: ConnectedDisplay, excluding ownPID: pid_t) -> DisplaySwapPlan {
+        let apps = onScreenWindows(excluding: ownPID)
         let screens = [first.frame, second.frame]
         let visible = [first.visibleFrame, second.visibleFrame]
-        let tally = SwapTally()
+        let collector = Collector<DisplaySwapPlan.AppMoves>()
         DispatchQueue.concurrentPerform(iterations: apps.count) { index in
-            let app = apps[index]
-            tally.add(swapWindows(of: app.pid, onScreen: app.frames, screens: screens, visible: visible))
+            if let moves = planWindows(of: apps[index].pid, onScreen: apps[index].windows, screens: screens, visible: visible) {
+                collector.append(moves)
+            }
         }
-        return tally.result
+        return DisplaySwapPlan(apps: collector.items)
     }
 
-    private func onScreenFrames(excluding ownPID: pid_t) -> [(pid: pid_t, frames: [CGRect])] {
+    /// 各 App 同時搬。
+    func execute(_ plan: DisplaySwapPlan) -> DisplaySwapResult {
+        let collector = Collector<DisplaySwapResult>()
+        DispatchQueue.concurrentPerform(iterations: plan.apps.count) { index in
+            collector.append(execute(plan.apps[index]))
+        }
+        return collector.items.reduce(into: DisplaySwapResult()) {
+            $0.moved += $1.moved
+            $0.failed += $1.failed
+        }
+    }
+
+    private struct OnScreenWindow {
+        let number: CGWindowID
+        let order: Int
+        let frame: CGRect
+    }
+
+    private func onScreenWindows(excluding ownPID: pid_t) -> [(pid: pid_t, windows: [OnScreenWindow])] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let info = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return [] }
-        var onScreen: [pid_t: [CGRect]] = [:]
-        for entry in info {
+        var onScreen: [pid_t: [OnScreenWindow]] = [:]
+        // 清單由前到後排列，順序就是疊放順序。
+        for (order, entry) in info.enumerated() {
             // 第 0 層才是一般視窗；選單列、Dock、浮動提示都在其他層。
             guard (entry[kCGWindowLayer as String] as? Int) == 0,
                   let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid != ownPID,
+                  let number = entry[kCGWindowNumber as String] as? CGWindowID,
                   let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { continue }
-            onScreen[pid, default: []].append(bounds)
+            onScreen[pid, default: []].append(OnScreenWindow(number: number, order: order, frame: bounds))
         }
         return onScreen.map { ($0.key, $0.value) }
     }
 
-    private func swapWindows(of pid: pid_t, onScreen: [CGRect], screens: [CGRect], visible: [CGRect]) -> DisplaySwapResult {
+    private func planWindows(of pid: pid_t, onScreen: [OnScreenWindow], screens: [CGRect], visible: [CGRect]) -> DisplaySwapPlan.AppMoves? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-        guard let elements = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return DisplaySwapResult() }
-        var windows: [(element: AXUIElement, frame: CGRect)] = []
+        guard let elements = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return nil }
+        var windows: [(element: AXUIElement, listed: OnScreenWindow)] = []
         for window in elements {
             if (attribute(window, kAXMinimizedAttribute) as? Bool) == true { continue }
             if (attribute(window, "AXFullScreen") as? Bool) == true { continue }
             guard let frame = frame(of: window),
-                  onScreen.contains(where: { Self.matches($0, frame) }) else { continue }
-            windows.append((window, frame))
+                  let listed = onScreen.first(where: { Self.matches($0.frame, frame) }) else { continue }
+            windows.append((window, OnScreenWindow(number: listed.number, order: listed.order, frame: frame)))
         }
-        let moves = DisplaySwapGeometry.plan(windows: windows.map(\.frame), screens: screens, visible: visible, first: 0, second: 1)
-        guard !moves.isEmpty else { return DisplaySwapResult() }
+        let targets = DisplaySwapGeometry.plan(windows: windows.map(\.listed.frame), screens: screens, visible: visible, first: 0, second: 1)
+        guard !targets.isEmpty else { return nil }
+        let moves = targets.map { index, target in
+            let listed = windows[index].listed
+            return (windows[index].element, PlannedWindowMove(windowNumber: listed.number, order: listed.order, from: listed.frame, to: target))
+        }
+        return DisplaySwapPlan.AppMoves(app: app, windows: moves)
+    }
 
+    private func execute(_ moves: DisplaySwapPlan.AppMoves) -> DisplaySwapResult {
         // 輔助增強模式開著時（Finder、開過螢幕閱讀器的瀏覽器），App 會用動畫慢慢移過去，搬完再開回來。
-        let enhanced = (attribute(app, Self.enhancedUserInterface) as? Bool) == true
+        let enhanced = (attribute(moves.app, Self.enhancedUserInterface) as? Bool) == true
         if enhanced {
-            AXUIElementSetAttributeValue(app, Self.enhancedUserInterface as CFString, kCFBooleanFalse)
+            AXUIElementSetAttributeValue(moves.app, Self.enhancedUserInterface as CFString, kCFBooleanFalse)
         }
         defer {
             if enhanced {
-                AXUIElementSetAttributeValue(app, Self.enhancedUserInterface as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(moves.app, Self.enhancedUserInterface as CFString, kCFBooleanTrue)
             }
         }
         var result = DisplaySwapResult()
-        for (index, target) in moves {
-            if move(windows[index].element, from: windows[index].frame, to: target) {
+        for window in moves.windows {
+            if move(window.element, from: window.move.from, to: window.move.to) {
                 result.moved += 1
             } else {
                 result.failed += 1
@@ -168,19 +225,16 @@ final class DisplaySwapService: Sendable {
     }
 }
 
-/// 各 App 的執行緒同時回報結果，用鎖保護加總。
-private final class SwapTally: @unchecked Sendable {
+/// 各 App 的執行緒同時回報結果，用鎖保護。
+private final class Collector<Item>: @unchecked Sendable {
     private let lock = NSLock()
-    private var total = DisplaySwapResult()
+    private var storage: [Item] = []
 
-    var result: DisplaySwapResult {
-        lock.withLock { total }
+    var items: [Item] {
+        lock.withLock { storage }
     }
 
-    func add(_ part: DisplaySwapResult) {
-        lock.withLock {
-            total.moved += part.moved
-            total.failed += part.failed
-        }
+    func append(_ item: Item) {
+        lock.withLock { storage.append(item) }
     }
 }

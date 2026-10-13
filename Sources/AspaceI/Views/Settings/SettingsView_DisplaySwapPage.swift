@@ -26,6 +26,26 @@ extension SettingsView {
                     ruleSection(rule, number: index + 1)
                 }
 
+                SettingsForm.section("選項") {
+                    SettingsForm.row {
+                        Text("動畫")
+                        Spacer()
+                        Toggle("", isOn: Binding(get: { manager.animates }, set: { manager.setAnimates($0) }))
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                    if manager.animates && !manager.canCaptureScreen {
+                        SettingsForm.divider
+                        SettingsForm.row {
+                            Text("螢幕錄製權限")
+                            Spacer()
+                            Text("未允許")
+                                .foregroundStyle(.secondary)
+                            Button("允許…") { manager.requestScreenCapture() }
+                        }
+                    }
+                }
+
                 if manager.displays.count < 2 {
                     SettingsForm.card {
                         SettingsForm.row {
