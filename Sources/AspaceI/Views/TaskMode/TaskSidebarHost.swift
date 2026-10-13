@@ -8,7 +8,7 @@ struct TaskSidebarHost: View {
         TaskSidebarView(
             items: manager.sidebarItems,
             selectedID: manager.selectedID,
-            thumbnail: { manager.thumbnails[$0] },
+            thumbnail: { manager.thumbnails[$0]?.image },
             onSelect: { manager.select($0) },
             onExit: { Task { await manager.deactivate() } }
         )

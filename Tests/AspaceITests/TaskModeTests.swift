@@ -53,4 +53,29 @@ struct TaskModeTests {
         #expect(TaskModeManager.quotaText(account) == expected)
         #expect(TaskModeManager.quotaText(nil) == "--")
     }
+
+    @MainActor
+    @Test("點側欄後疊放順序還沒跟上時維持點的那個，跟上、逾時或被關掉才交還")
+    func selectionHold() {
+        let now = ContinuousClock.now
+        let pending = (id: CGWindowID(2), until: now + .seconds(1))
+        let current: Set<CGWindowID> = [1, 2, 3]
+
+        let lagging = TaskModeManager.resolveSelection(front: 1, pending: pending, now: now, current: current)
+        #expect(lagging.selection == 2)
+        #expect(lagging.keepsPending)
+
+        let caughtUp = TaskModeManager.resolveSelection(front: 2, pending: pending, now: now, current: current)
+        #expect(caughtUp.selection == 2)
+        #expect(!caughtUp.keepsPending)
+
+        let expired = TaskModeManager.resolveSelection(front: 1, pending: pending, now: now + .seconds(2), current: current)
+        #expect(expired.selection == 1)
+
+        let closed = TaskModeManager.resolveSelection(front: 1, pending: pending, now: now, current: [1, 3])
+        #expect(closed.selection == 1)
+
+        let none = TaskModeManager.resolveSelection(front: 3, pending: nil, now: now, current: current)
+        #expect(none.selection == 3)
+    }
 }

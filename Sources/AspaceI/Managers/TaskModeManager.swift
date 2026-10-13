@@ -14,6 +14,8 @@ final class TaskModeManager {
     /// 新開的視窗、切換、關掉的視窗最慢這麼久會反映到側欄。
     private static let refreshInterval: Duration = .milliseconds(1500)
     private static let thumbnailPointWidth: CGFloat = 200
+    /// 點側欄後，系統的視窗疊放順序要一會兒才跟上；這段期間以點的為準，不讓重掃把選取搶回舊視窗。
+    private static let selectionHold: Duration = .milliseconds(1500)
     private static let logger = Logger(subsystem: "com.huangyouci.AspaceI", category: "TaskMode")
 
     private(set) var isActive = false
@@ -28,7 +30,8 @@ final class TaskModeManager {
     private(set) var windows: [TaskWindow] = []
     private(set) var sidebarItems: [TaskSidebarView.Item] = []
     private(set) var selectedID: CGWindowID?
-    private(set) var thumbnails: [CGWindowID: CGImage] = [:]
+    /// 每個視窗一個盒子，新畫面只寫進盒子：只有那張縮圖重畫，不會每秒好幾次把整個側欄重畫。
+    private(set) var thumbnails: [CGWindowID: Thumbnail] = [:]
     var errorMessage: String?
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -46,6 +49,7 @@ final class TaskModeManager {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var screenObserver: NSObjectProtocol?
+    @ObservationIgnored private var pendingSelection: (id: CGWindowID, until: ContinuousClock.Instant)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -53,7 +57,11 @@ final class TaskModeManager {
         shortcut = Self.decode(KeyShortcut.self, from: defaults.data(forKey: Self.shortcutKey))
         capturer = WindowThumbnailCapturer { [weak self] id, image in
             guard let self, isActive else { return }
-            thumbnails[id] = image
+            if let box = thumbnails[id] {
+                box.image = image
+            } else {
+                thumbnails[id] = Thumbnail(image: image)
+            }
         }
     }
 
@@ -214,11 +222,19 @@ final class TaskModeManager {
     }
 
     /// 把視窗拉到最前面並把它的 App 叫到前景，鍵盤輸入才會進去。
+    /// 選取框先換過去；拉視窗走 Accessibility，App 回應慢時會等，放到背景做，側欄才不會凍住。
     func select(_ id: CGWindowID) {
         guard let element = elements[id], let window = windows.first(where: { $0.id == id }) else { return }
         selectedID = id
-        AXWindow.raise(element)
-        NSRunningApplication(processIdentifier: window.pid)?.activate()
+        pendingSelection = (id, .now + Self.selectionHold)
+        let box = RaiseTarget(element: element)
+        let pid = window.pid
+        Task.detached {
+            AXWindow.raise(box.element)
+            await MainActor.run {
+                _ = NSRunningApplication(processIdentifier: pid)?.activate()
+            }
+        }
     }
 
     // MARK: 更新
@@ -275,10 +291,15 @@ final class TaskModeManager {
             originalFrames[window.id] = window.frame
         }
         elements = scan.elements
-        windows = scan.windows
+        // 內容沒變就不重設：觀察到的屬性一被寫入，整個側欄就會重畫。
+        if windows != scan.windows {
+            windows = scan.windows
+        }
         let current = Set(scan.windows.map(\.id))
         originalFrames = originalFrames.filter { current.contains($0.key) }
-        thumbnails = thumbnails.filter { current.contains($0.key) }
+        if thumbnails.keys.contains(where: { !current.contains($0) }) {
+            thumbnails = thumbnails.filter { current.contains($0.key) }
+        }
 
         // 只把新出現的視窗放進工作區；已經接手的視窗使用者自己挪了就尊重他。
         let moves = arrived.compactMap { window -> (element: AXUIElement, from: CGRect, to: CGRect, id: CGWindowID)? in
@@ -297,8 +318,19 @@ final class TaskModeManager {
         }
 
         // 視窗清單由前到後排，第一個就是使用者現在看的那個，不論是點側欄還是自己點視窗切過去的。
-        selectedID = windows.first?.id
-        sidebarItems = makeItems()
+        // 剛點過側欄時，疊放順序還沒跟上就維持點的那個；跟上了或過了時限才交還給清單。
+        let resolved = Self.resolveSelection(front: windows.first?.id, pending: pendingSelection, now: .now, current: current)
+        if !resolved.keepsPending {
+            pendingSelection = nil
+        }
+        let selection = resolved.selection
+        if selectedID != selection {
+            selectedID = selection
+        }
+        let items = makeItems()
+        if sidebarItems != items {
+            sidebarItems = items
+        }
         if canCaptureScreen {
             await capturer?.update(windowIDs: current, pixelWidth: Int(Self.thumbnailPointWidth * display.scale))
         }
@@ -341,6 +373,19 @@ final class TaskModeManager {
         }
     }
 
+    /// 剛點過側欄時以點的為準；最上層已經是它、時限到了、或它被關掉了，才交還給疊放順序。
+    static func resolveSelection(
+        front: CGWindowID?,
+        pending: (id: CGWindowID, until: ContinuousClock.Instant)?,
+        now: ContinuousClock.Instant,
+        current: Set<CGWindowID>
+    ) -> (selection: CGWindowID?, keepsPending: Bool) {
+        guard let pending, front != pending.id, now < pending.until, current.contains(pending.id) else {
+            return (front, false)
+        }
+        return (pending.id, true)
+    }
+
     static func quotaText(_ account: Account?) -> String {
         let parts = (account?.quota?.primaryWindows ?? [])
             .filter { $0.kind != .other }
@@ -373,6 +418,23 @@ final class TaskModeManager {
             return nil
         }
     }
+}
+
+extension TaskModeManager {
+    @MainActor
+    @Observable
+    final class Thumbnail {
+        var image: CGImage
+
+        init(image: CGImage) {
+            self.image = image
+        }
+    }
+}
+
+/// Accessibility 物件沒有標 Sendable，包一層交給背景拉到最前面。
+private struct RaiseTarget: @unchecked Sendable {
+    let element: AXUIElement
 }
 
 /// Accessibility 物件沒有標 Sendable，包一層交給背景搬動。

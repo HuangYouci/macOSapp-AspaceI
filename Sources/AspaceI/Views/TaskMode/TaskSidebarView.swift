@@ -76,13 +76,7 @@ struct TaskSidebarView: View {
     private func preview(_ item: Item, isSelected: Bool) -> some View {
         ZStack {
             Color.black.opacity(0.08)
-            if let image = thumbnail(item.id) {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                PlatformBadge(platform: item.platform, size: 28)
-            }
+            Preview(platform: item.platform) { thumbnail(item.id) }
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(16 / 10, contentMode: .fit)
