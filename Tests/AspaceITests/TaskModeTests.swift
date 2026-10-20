@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import Testing
@@ -38,20 +39,43 @@ struct TaskModeTests {
     }
 
     @MainActor
-    @Test("額度只列段、週、月，沒有額度顯示 --")
-    func quotaText() {
+    @Test("額度只列段、週、月，帶著重置時間；沒有額度是空的")
+    func quota() {
+        let reset = Date(timeIntervalSince1970: 1_700_000_000)
         let account = Account(
             platform: .claude,
             displayName: "Claude",
             quota: QuotaSnapshot(windows: [
                 QuotaWindow(id: "7d", title: "7d", remainingPercentage: 40, resetsAt: nil, kind: .week),
-                QuotaWindow(id: "5h", title: "5h", remainingPercentage: 62, resetsAt: nil, kind: .fiveHour)
+                QuotaWindow(id: "5h", title: "5h", remainingPercentage: 62, resetsAt: reset, kind: .fiveHour)
             ], fetchedAt: .now)
         )
         // 標籤跟著系統語系（zh-Hant 是段／週，en 是 S／W）。
-        let expected = "\(QuotaWindow.Kind.fiveHour.shortTitle) 62% · \(QuotaWindow.Kind.week.shortTitle) 40%"
-        #expect(TaskModeManager.quotaText(account) == expected)
-        #expect(TaskModeManager.quotaText(nil) == "--")
+        #expect(TaskModeManager.quota(account) == [
+            TaskSidebarView.Quota(title: QuotaWindow.Kind.fiveHour.shortTitle, remainingPercentage: 62, resetsAt: reset),
+            TaskSidebarView.Quota(title: QuotaWindow.Kind.week.shortTitle, remainingPercentage: 40, resetsAt: nil)
+        ])
+        #expect(TaskModeManager.quota(nil).isEmpty)
+    }
+
+    @Test("App 忙到 Accessibility 逾時時沿用上一輪的視窗；視窗伺服器不再列出的才拿掉")
+    func carriesOverUnresponsiveWindows() {
+        let element = AXUIElementCreateApplication(1)
+        let busy = TaskWindow(id: 7, pid: 1, title: "busy", frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let gone = TaskWindow(id: 8, pid: 1, title: "gone", frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let fresh = TaskWindow(id: 9, pid: 2, title: "fresh", frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        var scan = TaskWindowScan()
+        scan.windows = [fresh]
+        scan.elements = [9: element]
+        let moved = CGRect(x: 5, y: 5, width: 900, height: 700)
+        scan.listed = [7: (order: 0, frame: moved), 9: (order: 1, frame: fresh.frame)]
+
+        let merged = scan.carryingOver([busy, gone], elements: [7: element, 8: element])
+        // 疊放順序照視窗伺服器，外框用它最新的。
+        #expect(merged.windows.map(\.id) == [7, 9])
+        #expect(merged.windows.first?.frame == moved)
+        #expect(merged.elements[7] != nil)
+        #expect(merged.elements[8] == nil)
     }
 
     @MainActor

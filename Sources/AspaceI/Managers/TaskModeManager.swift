@@ -229,8 +229,9 @@ final class TaskModeManager {
         pendingSelection = (id, .now + Self.selectionHold)
         let box = RaiseTarget(element: element)
         let pid = window.pid
+        let service = windowService
         Task.detached {
-            AXWindow.raise(box.element)
+            service.raise(box.element)
             await MainActor.run {
                 _ = NSRunningApplication(processIdentifier: pid)?.activate()
             }
@@ -272,16 +273,32 @@ final class TaskModeManager {
         })
     }
 
-    private var isRefreshing = false
+    @ObservationIgnored private var isRefreshing = false
+    @ObservationIgnored private var refreshQueued = false
 
+    /// 進行中再被要求（例如切換 App）就排到這輪之後再跑一次，不丟掉：
+    /// 丟掉的話，有個 App 忙到這輪變慢時，選取框要等到下一次定時重掃才跟上。
     private func refresh() async {
-        guard isActive, !isRefreshing, let display = activeDisplay, let instances else { return }
+        guard !isRefreshing else {
+            refreshQueued = true
+            return
+        }
         isRefreshing = true
         defer { isRefreshing = false }
+        repeat {
+            refreshQueued = false
+            await refreshOnce()
+        } while refreshQueued && isActive
+    }
+
+    private func refreshOnce() async {
+        guard isActive, let display = activeDisplay, let instances else { return }
 
         let pids = Set(instances.runningProcessIDs.values.flatMap { $0 })
         let service = windowService
-        let scan = await Task.detached { service.scan(pids: pids) }.value
+        let previous = windows
+        let previousElements = TaskElements(elements: elements)
+        let scan = await Task.detached { service.scan(pids: pids).carryingOver(previous, elements: previousElements.elements) }.value
         guard isActive else { return }
 
         let known = Set(elements.keys)
@@ -412,7 +429,7 @@ final class TaskModeManager {
                 id: window.id,
                 platform: instance.platform,
                 name: name,
-                quota: Self.quotaText(account),
+                quota: Self.quota(account),
                 title: window.title
             )
         }
@@ -436,11 +453,10 @@ final class TaskModeManager {
         return (pending.id, true)
     }
 
-    static func quotaText(_ account: Account?) -> String {
-        let parts = (account?.quota?.primaryWindows ?? [])
+    static func quota(_ account: Account?) -> [TaskSidebarView.Quota] {
+        (account?.quota?.primaryWindows ?? [])
             .filter { $0.kind != .other }
-            .map { "\($0.kind.shortTitle) \($0.remainingPercentage)%" }
-        return parts.isEmpty ? "--" : parts.joined(separator: " · ")
+            .map { TaskSidebarView.Quota(title: $0.kind.shortTitle, remainingPercentage: $0.remainingPercentage, resetsAt: $0.resetsAt) }
     }
 
     // MARK: 共用
@@ -480,6 +496,11 @@ extension TaskModeManager {
             self.image = image
         }
     }
+}
+
+/// Accessibility 物件沒有標 Sendable，包一層交給背景掃描沿用。
+private struct TaskElements: @unchecked Sendable {
+    let elements: [CGWindowID: AXUIElement]
 }
 
 /// Accessibility 物件沒有標 Sendable，包一層交給背景拉到最前面。

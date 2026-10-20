@@ -14,6 +14,28 @@ struct TaskWindowScan: @unchecked Sendable {
     /// 由前到後排列，第一個就是目前最上層的視窗。
     var windows: [TaskWindow] = []
     var elements: [CGWindowID: AXUIElement] = [:]
+    /// 視窗伺服器列出的、屬於這些程序的一般視窗（疊放順序與外框）。App 忙的時候 Accessibility 會逾時，
+    /// 這份清單不經過 App，仍然是準的。
+    var listed: [CGWindowID: (order: Int, frame: CGRect)] = [:]
+
+    /// 上一輪有、這一輪 Accessibility 沒讀到，但視窗伺服器還列著的視窗沿用上一輪的（外框用視窗伺服器的）。
+    /// App 在忙（例如正在大量輸出）時 Accessibility 會逾時；直接當成視窗不見了，它會從側欄掉出去、
+    /// 縮圖串流被關掉，下一輪讀到時又被當成新視窗搬回工作區，還會把「結束時要還原的位置」記成工作區。
+    /// 最小化、全螢幕、換到別的桌面空間的視窗視窗伺服器不會列，照樣會被拿掉。
+    func carryingOver(_ previous: [TaskWindow], elements previousElements: [CGWindowID: AXUIElement]) -> TaskWindowScan {
+        var merged = self
+        var orders = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, listed[$0.id]?.order ?? Int.max) })
+        for window in previous where merged.elements[window.id] == nil {
+            guard let entry = listed[window.id], let element = previousElements[window.id] else { continue }
+            var kept = window
+            kept.frame = entry.frame
+            merged.windows.append(kept)
+            merged.elements[window.id] = element
+            orders[window.id] = entry.order
+        }
+        merged.windows.sort { (orders[$0.id] ?? Int.max) < (orders[$1.id] ?? Int.max) }
+        return merged
+    }
 }
 
 /// 讀與搬 AI 工具的視窗。需要輔助使用權限。
@@ -21,6 +43,8 @@ final class TaskWindowService: Sendable {
     static let shared = TaskWindowService()
 
     private static let messagingTimeout: Float = 0.3
+    /// 搬動與拉到最前面是使用者要的動作，在背景做，可以多等忙碌的 App 一會兒。
+    private static let actionTimeout: Float = 1.5
     private static let matchTolerance: CGFloat = 2
     /// 比這小的多半是浮動面板或彈出視窗，不接手。
     private static let minimumSize = CGSize(width: 300, height: 200)
@@ -41,6 +65,13 @@ final class TaskWindowService: Sendable {
             listed[pid, default: []].append((number, order, bounds))
         }
 
+        var scan = TaskWindowScan()
+        for entries in listed.values {
+            for entry in entries {
+                scan.listed[entry.number] = (entry.order, entry.frame)
+            }
+        }
+
         let apps = Array(listed)
         let found = LockedCollector<(order: Int, window: TaskWindow, element: AXUIElement)>()
         DispatchQueue.concurrentPerform(iterations: apps.count) { index in
@@ -50,6 +81,8 @@ final class TaskWindowService: Sendable {
             guard let elements = AXWindow.attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return }
             var local: [(order: Int, window: TaskWindow, element: AXUIElement)] = []
             for element in elements {
+                // 不依賴視窗物件沿用 App 的逾時，各自設；沒設時是系統預設的好幾秒，一個忙碌的 App 就拖住整輪掃描。
+                AXUIElementSetMessagingTimeout(element, Self.messagingTimeout)
                 guard (AXWindow.attribute(element, kAXSubroleAttribute) as? String) == kAXStandardWindowSubrole,
                       (AXWindow.attribute(element, kAXMinimizedAttribute) as? Bool) != true,
                       (AXWindow.attribute(element, "AXFullScreen") as? Bool) != true,
@@ -61,7 +94,6 @@ final class TaskWindowService: Sendable {
             found.append(contentsOf: local)
         }
 
-        var scan = TaskWindowScan()
         for item in found.items.sorted(by: { $0.order < $1.order }) where scan.elements[item.window.id] == nil {
             scan.windows.append(item.window)
             scan.elements[item.window.id] = item.element
@@ -75,11 +107,17 @@ final class TaskWindowService: Sendable {
         let failed = LockedCollector<CGWindowID>()
         DispatchQueue.concurrentPerform(iterations: box.moves.count) { index in
             let move = box.moves[index]
+            AXUIElementSetMessagingTimeout(move.element, Self.actionTimeout)
             if !AXWindow.move(move.element, from: move.from, to: move.to) {
                 failed.append(move.id)
             }
         }
         return Set(failed.items)
+    }
+
+    func raise(_ element: AXUIElement) {
+        AXUIElementSetMessagingTimeout(element, Self.actionTimeout)
+        AXWindow.raise(element)
     }
 
     private static func matches(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
