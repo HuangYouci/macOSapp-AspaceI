@@ -380,6 +380,14 @@ final class InstanceManager {
             NSRunningApplication(processIdentifier: running)?.activate()
             return
         }
+        // Helper 晚一點才跟著結束；還在的話接下來的 prepare 會原樣沿用，圖示與檔名要等下次啟動才補回。
+        for _ in 0..<10 where isCloneInUse(instance) {
+            do {
+                try await Task.sleep(for: .milliseconds(500))
+            } catch {
+                return
+            }
+        }
         launch(instance, accounts: accounts)
     }
 
