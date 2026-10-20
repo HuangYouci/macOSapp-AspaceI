@@ -240,8 +240,19 @@ final class InstanceManager {
             original: original,
             instance: instance,
             title: "\(original.deletingPathExtension().lastPathComponent) - \(account?.label ?? instance.name)",
-            badge: shortLabel(for: instance, account: account, accounts: accounts)
+            badge: shortLabel(for: instance, account: account, accounts: accounts),
+            inUse: isCloneInUse(instance)
         )
+    }
+
+    /// 複本資料夾裡有沒有任何程序在跑，含不帶 `--user-data-dir`、不算這個實例的那種（`mainProcessIDs` 看不到）。
+    /// 用 NSWorkspace 而不是 `ps`：這裡在主執行緒上，`ps` 要好幾秒。
+    private func isCloneInUse(_ instance: Instance) -> Bool {
+        let folder = AppCloneService.folderName(for: instance.id)
+        return NSWorkspace.shared.runningApplications.contains { app in
+            guard let path = app.bundleURL?.path else { return false }
+            return AppCloneService.instanceFolder(inPath: path) == folder
+        }
     }
 
     /// 短名稱的撞名規則看的是所有帳號與沒帳號的實例名稱，任一帳號增刪改名都可能讓別的實例圖示上的字跟著變。
@@ -252,7 +263,8 @@ final class InstanceManager {
         for group in groups where group.isInstalled {
             let appPath = group.defaultInstance.executablePath
             guard InstanceService.updaterProcessIDs(appPath: appPath, cloneFolders: cloneFolders(for: group.platform), in: processes).isEmpty else { continue }
-            for instance in group.instances where InstanceService.mainProcessIDs(for: instance, isDefault: false, in: processes).isEmpty {
+            for instance in group.instances
+                where InstanceService.mainProcessIDs(for: instance, isDefault: false, in: processes).isEmpty && !isCloneInUse(instance) {
                 do {
                     guard try !clones.bundles(for: instance.id).isEmpty else { continue }
                     _ = try prepareClone(for: instance, accounts: accounts)
@@ -354,10 +366,13 @@ final class InstanceManager {
         if let command, command.contains("--user-data-dir") { return }
         logger.notice("InstanceManager.recoverBareClone | \(instance.name, privacy: .public) 的複本被不帶參數開啟，改以實例資料夾重開")
         if command != nil {
+            // 不帶參數的這份開到的是預設資料夾，剛開不久、沒有使用者的資料，收不掉就強制結束：
+            // 留著它，接下來重做複本會把它的 bundle 刪掉，它就成了 Dock 上點不開、結束不掉的另一格。
             service.stop(processIDs: [pid])
-            for _ in 0..<20 {
-                try? await Task.sleep(for: .milliseconds(500))
-                if await processList()[pid] == nil { break }
+            if !(await waitForExit(pid)) {
+                logger.notice("InstanceManager.recoverBareClone | \(instance.name, privacy: .public) 不帶參數的程序沒有回應結束要求，強制結束")
+                service.forceStop(processIDs: [pid])
+                _ = await waitForExit(pid)
             }
         }
         // 實例已經在跑（例如從 Dock 點了複本）就把它叫到前面，否則看起來像是點了打不開。
@@ -365,7 +380,28 @@ final class InstanceManager {
             NSRunningApplication(processIdentifier: running)?.activate()
             return
         }
+        // Helper 晚一點才跟著結束；還在的話接下來的 prepare 會原樣沿用，圖示與檔名要等下次啟動才補回。
+        for _ in 0..<10 where isCloneInUse(instance) {
+            do {
+                try await Task.sleep(for: .milliseconds(500))
+            } catch {
+                return
+            }
+        }
         launch(instance, accounts: accounts)
+    }
+
+    /// 最多等十秒。
+    private func waitForExit(_ pid: Int32) async -> Bool {
+        for _ in 0..<20 {
+            do {
+                try await Task.sleep(for: .milliseconds(500))
+            } catch {
+                return false
+            }
+            if kill(pid, 0) != 0, errno == ESRCH { return true }
+        }
+        return false
     }
 
     func stop(_ instance: Instance) {
