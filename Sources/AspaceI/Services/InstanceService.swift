@@ -225,6 +225,12 @@ final class InstanceService: Sendable {
         }
     }
 
+    func forceStop(processIDs: [Int32]) {
+        for pid in processIDs {
+            kill(pid, SIGKILL)
+        }
+    }
+
     func trashProfile(for instance: Instance) throws {
         let profile = URL(fileURLWithPath: instance.profileDirectory).standardizedFileURL
         let base = try instancesRootURL().standardizedFileURL

@@ -17,8 +17,10 @@ final class AppCloneService: Sendable {
     /// 開過的 App 受 macOS「App 管理」保護：AspaceI 沒有該權限，改不了裡面任何東西（圖示也寫不進去），
     /// 但整包改名、刪除不受限。所以圖示只畫在剛複製、還沒開過的複本上；之後圖示要換、
     /// 或被更新程式整包換掉而不見時，從最新那份重新複製一份，不動舊的內容。
+    ///
+    /// `inUse`：複本資料夾裡還有程序在跑（含不帶參數開起來、不算實例的那種）時原樣沿用，不改名也不換掉。
     @MainActor
-    func prepare(source: URL, original: URL, instance: Instance, title: String, badge: String) throws -> URL {
+    func prepare(source: URL, original: URL, instance: Instance, title: String, badge: String, inUse: Bool) throws -> URL {
         let directory = try directory(for: instance.id)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let target = directory.appending(path: "\(Self.sanitizedFileName(title)).app", directoryHint: .isDirectory)
@@ -29,9 +31,12 @@ final class AppCloneService: Sendable {
             source: source,
             sourceVersion: Self.bundleVersion(of: source),
             storedBadge: FileManager.default.fileExists(atPath: badgeFile.path) ? try String(contentsOf: badgeFile, encoding: .utf8) : nil,
-            badge: badge
+            badge: badge,
+            inUse: inUse
         )
         switch plan {
+        case .keepAsIs(let bundle):
+            return bundle
         case .reuse(let keep):
             for bundle in existing where bundle.standardizedFileURL != keep.standardizedFileURL {
                 try FileManager.default.removeItem(at: bundle)
@@ -61,16 +66,24 @@ final class AppCloneService: Sendable {
         case reuse(URL)
         /// 從這份重新複製並畫圖示。
         case reclone(from: URL)
+        /// 有程序正從複本執行，原樣沿用。
+        case keepAsIs(URL)
     }
 
     /// 版本最新、而且圖示還在、圖示上的字也對的複本才沿用；否則從版本最新的那份（可能就是它）重新複製。
+    /// 有程序正從複本執行時一律原樣沿用：刪掉執行中程序的 bundle，它會變成 Dock 上沒有圖示、點不開的另一格，
+    /// 而且 LaunchServices 認不得它，也結束不掉（2026-10-20 實測）。
     static func plan(
         existing: [(url: URL, version: String?, hasCustomIcon: Bool)],
         source: URL,
         sourceVersion: String?,
         storedBadge: String?,
-        badge: String
+        badge: String,
+        inUse: Bool
     ) -> PreparePlan {
+        if inUse, let running = newest(existing.map { ($0.url, $0.version) }) ?? existing.first?.url {
+            return .keepAsIs(running)
+        }
         guard let keep = reusableClone(existing.map { ($0.url, $0.version) }, sourceVersion: sourceVersion) else {
             return .reclone(from: source)
         }
