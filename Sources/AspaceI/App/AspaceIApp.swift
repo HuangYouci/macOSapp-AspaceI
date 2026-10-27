@@ -20,6 +20,7 @@ struct AspaceIApp: App {
     @State private var usageManager = UsageManager()
     @State private var displaySwapManager = DisplaySwapManager()
     @State private var taskModeManager = TaskModeManager()
+    @State private var blackoutManager = BlackoutManager()
     @State private var loginManager: AccountLoginManager
 
     init() {
@@ -40,6 +41,7 @@ struct AspaceIApp: App {
                 .environment(usageManager)
                 .environment(displaySwapManager)
                 .environment(taskModeManager)
+                .environment(blackoutManager)
         } label: {
             MenuBarLabel(items: MenuBarQuotaItem.items(
                 accounts: accountManager.accounts,

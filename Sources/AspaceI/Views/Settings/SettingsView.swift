@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(UsageManager.self) private var usageManager
     @Environment(DisplaySwapManager.self) private var displaySwapManager
     @Environment(TaskModeManager.self) private var taskModeManager
+    @Environment(BlackoutManager.self) private var blackoutManager
     /// 二次確認交給 popup 外層呈現：MenuBarExtra 的面板收不到系統對話框的點擊。
     let confirm: (ConfirmationRequest) -> Void
     let onOpen: (Page) -> Void
@@ -38,6 +39,12 @@ struct SettingsView: View {
                 SettingsForm.navigationRow("螢幕互換", value: displaySwapSummary) { onOpen(.displaySwap) }
                 rowDivider
                 SettingsForm.navigationRow("任務管理", value: taskModeSummary) { onOpen(.taskMode) }
+                rowDivider
+                row {
+                    Text("螢幕全黑")
+                    Spacer()
+                    Button("開始") { blackoutManager.start() }
+                }
             }
 
             section("Menu bar") {
