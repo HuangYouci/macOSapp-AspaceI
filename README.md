@@ -6,7 +6,7 @@ AspaceI 是 macOS 選單列工具，集中管理 Claude、Codex、Antigravity �
 - 不建立主視窗、不顯示 Dock 圖示
 - 憑證只存在這台 Mac 的 Keychain，沒有 AspaceI 自己的伺服器
 
-目前版本：26.10.12　作者：Huang Youci
+目前版本：26.10.27　作者：Huang Youci
 
 ## 功能
 
