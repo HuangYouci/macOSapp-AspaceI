@@ -81,8 +81,6 @@ struct MenuBarContentView: View {
                 switch settingsPage {
                 case .displaySwap:
                     scrollPage { SettingsView.DisplaySwapPage { settingsPage = nil } }
-                case .taskMode:
-                    scrollPage { SettingsView.TaskModePage { settingsPage = nil } }
                 case .menuBarAccounts:
                     scrollPage { SettingsView.MenuBarAccountsPage { settingsPage = nil } }
                 case .about:

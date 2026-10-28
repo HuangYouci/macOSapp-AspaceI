@@ -9,8 +9,8 @@ import os
 @Observable
 final class TaskModeManager {
     private static let displayKey = "taskModeDisplay"
-    private static let shortcutKey = "taskModeShortcut"
-    private static let hotKeyID = UUID(uuidString: "7A5C0DE0-0000-4000-8000-000000000001") ?? UUID()
+    /// 已拿掉的快捷鍵（2026-10-29），舊版存的值在啟動時清掉。
+    private static let legacyShortcutKey = "taskModeShortcut"
     /// 新開的視窗、切換、關掉的視窗最慢這麼久會反映到側欄。
     private static let refreshInterval: Duration = .milliseconds(1500)
     private static let thumbnailPointWidth: CGFloat = 200
@@ -22,9 +22,6 @@ final class TaskModeManager {
     private(set) var isChanging = false
     private(set) var display: DisplayReference?
     private(set) var displays: [ConnectedDisplay] = []
-    private(set) var shortcut: KeyShortcut?
-    private(set) var isRecording = false
-    private(set) var shortcutConflicted = false
     private(set) var isTrusted = false
     private(set) var canCaptureScreen = false
     private(set) var windows: [TaskWindow] = []
@@ -38,7 +35,6 @@ final class TaskModeManager {
     @ObservationIgnored private let displayService = DisplaySwapService.shared
     @ObservationIgnored private let windowService = TaskWindowService.shared
     @ObservationIgnored private let snapshotService = WindowSnapshotService.shared
-    @ObservationIgnored private let recorder = ShortcutRecorder()
     @ObservationIgnored private let panel = TaskSidebarPanel()
     @ObservationIgnored private var capturer: WindowThumbnailCapturer?
     @ObservationIgnored private var instances: InstanceManager?
@@ -54,7 +50,7 @@ final class TaskModeManager {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         display = Self.decode(DisplayReference.self, from: defaults.data(forKey: Self.displayKey))
-        shortcut = Self.decode(KeyShortcut.self, from: defaults.data(forKey: Self.shortcutKey))
+        defaults.removeObject(forKey: Self.legacyShortcutKey)
         capturer = WindowThumbnailCapturer { [weak self] id, image in
             guard let self, isActive else { return }
             if let box = thumbnails[id] {
@@ -71,7 +67,6 @@ final class TaskModeManager {
         self.accounts = accounts
         refreshDisplays()
         refreshPermissions()
-        registerHotKey()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -111,54 +106,7 @@ final class TaskModeManager {
         save(reference, forKey: Self.displayKey)
     }
 
-    // MARK: 快捷鍵
-
-    func startRecording() {
-        recorder.stop()
-        isRecording = true
-        recorder.start { [weak self] outcome in
-            guard let self else { return }
-            isRecording = false
-            switch outcome {
-            case .recorded(let shortcut): setShortcut(shortcut)
-            case .cleared: setShortcut(nil)
-            case .cancelled: break
-            }
-        }
-    }
-
-    func stopRecording() {
-        recorder.stop()
-    }
-
-    func setShortcut(_ shortcut: KeyShortcut?) {
-        self.shortcut = shortcut
-        if let shortcut {
-            save(shortcut, forKey: Self.shortcutKey)
-        } else {
-            defaults.removeObject(forKey: Self.shortcutKey)
-        }
-        registerHotKey()
-    }
-
-    private func registerHotKey() {
-        let items: [GlobalHotKeys.Item] = shortcut.map { shortcut in
-            [(Self.hotKeyID, shortcut, { [weak self] in
-                Task { await self?.toggle() }
-            })]
-        } ?? []
-        shortcutConflicted = !GlobalHotKeys.shared.set("taskMode", items).isEmpty
-    }
-
     // MARK: 開關
-
-    func toggle() async {
-        if isActive {
-            await deactivate()
-        } else {
-            await activate()
-        }
-    }
 
     func activate() async {
         guard !isActive, !isChanging else { return }
@@ -176,7 +124,7 @@ final class TaskModeManager {
             return
         }
         // 縮圖要螢幕錄製權限，沒有也能用，只是側欄只有圖示。不在這裡要權限：
-        // 每次開啟都跳出系統設定會打斷使用者，而且開啟流程會卡到系統設定關掉，這段期間的快捷鍵都被忽略。
+        // 每次開啟都跳出系統設定會打斷使用者，而且開啟流程會卡到系統設定關掉。
         activeDisplay = target
         isActive = true
         errorMessage = nil
@@ -461,10 +409,8 @@ final class TaskModeManager {
 
     // MARK: 共用
 
-    /// 快捷鍵觸發時 popup 通常沒開，看不到訊息，所以同時發出提示音。
     private func fail(_ message: String) {
         errorMessage = message
-        NSSound.beep()
     }
 
     private func save(_ value: some Encodable, forKey key: String) {
