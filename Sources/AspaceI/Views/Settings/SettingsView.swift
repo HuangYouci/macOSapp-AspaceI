@@ -247,7 +247,7 @@ struct SettingsView: View {
 }
 
 extension SettingsView {
-    static let version = "26.10.27"
+    static let version = "26.10.29"
 
     /// 設定的子頁，由 popup 外層負責切換，進出子頁時捲動位置從頂端開始。
     enum Page: Hashable {
