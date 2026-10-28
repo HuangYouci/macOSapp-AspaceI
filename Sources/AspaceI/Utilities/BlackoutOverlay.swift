@@ -19,8 +19,6 @@ final class BlackoutOverlay {
             window.hasShadow = false
             window.isReleasedWhenClosed = false
             window.animationBehavior = .none
-            // 沒開的話游標在視窗上移動不會送出 mouseMoved，動滑鼠退不出來。
-            window.acceptsMouseMovedEvents = true
             window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
             window.setFrame(screen.frame, display: false)
             window.orderFrontRegardless()
