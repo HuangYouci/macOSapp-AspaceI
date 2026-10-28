@@ -38,7 +38,7 @@ struct SettingsView: View {
                 rowDivider
                 SettingsForm.navigationRow("螢幕互換", value: displaySwapSummary) { onOpen(.displaySwap) }
                 rowDivider
-                SettingsForm.navigationRow("任務管理", value: taskModeSummary) { onOpen(.taskMode) }
+                taskModeRows
                 rowDivider
                 row {
                     Text("螢幕全黑")
@@ -136,6 +136,14 @@ struct SettingsView: View {
         .padding(.bottom, 4)
         .onAppear {
             settingsManager.refreshLaunchAtLoginStatus()
+            taskModeManager.refreshDisplays()
+        }
+        .task {
+            // 使用者去系統設定按下允許後沒有通知，畫面開著時每秒看一次。
+            while !Task.isCancelled {
+                taskModeManager.refreshPermissions()
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
         .fileExporter(
             isPresented: Binding(get: { exportDocument != nil }, set: { if !$0 { exportDocument = nil } }),
@@ -163,8 +171,66 @@ struct SettingsView: View {
         }
     }
 
-    private var taskModeSummary: String? {
-        taskModeManager.isActive ? "開啟中" : taskModeManager.shortcut?.displayString
+    /// 選螢幕、按開始；只有一個螢幕時不顯示選單。權限與錯誤只在缺少或失敗時出現。
+    @ViewBuilder
+    private var taskModeRows: some View {
+        row {
+            Text("任務管理")
+            Spacer()
+            if taskModeManager.displays.count > 1 {
+                Picker("螢幕", selection: Binding(
+                    get: { taskModeManager.resolvedDisplay?.uuid ?? "" },
+                    set: { uuid in
+                        if let display = taskModeManager.displays.first(where: { $0.uuid == uuid }) {
+                            taskModeManager.setDisplay(display.reference)
+                        }
+                    }
+                )) {
+                    ForEach(taskModeManager.displays, id: \.uuid) { display in
+                        Text(display.name).tag(display.uuid)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .disabled(taskModeManager.isActive)
+            }
+            Button(taskModeManager.isActive ? "結束" : "開始") {
+                Task {
+                    if taskModeManager.isActive {
+                        await taskModeManager.deactivate()
+                    } else {
+                        await taskModeManager.activate()
+                    }
+                }
+            }
+            .disabled(taskModeManager.isChanging)
+        }
+        if !taskModeManager.isTrusted {
+            rowDivider
+            permissionRow("輔助使用權限") { taskModeManager.requestTrust() }
+        }
+        if !taskModeManager.canCaptureScreen {
+            rowDivider
+            permissionRow("螢幕錄製權限") { taskModeManager.requestScreenCapture() }
+        }
+        if let errorMessage = taskModeManager.errorMessage {
+            rowDivider
+            row {
+                Text(errorMessage)
+                    .font(.scaled(.caption))
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func permissionRow(_ title: String, action: @escaping () -> Void) -> some View {
+        row {
+            Text(title)
+            Spacer()
+            Text("未允許")
+                .foregroundStyle(.secondary)
+            Button("允許…", action: action)
+        }
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -181,12 +247,11 @@ struct SettingsView: View {
 }
 
 extension SettingsView {
-    static let version = "26.10.27"
+    static let version = "26.10.29"
 
     /// 設定的子頁，由 popup 外層負責切換，進出子頁時捲動位置從頂端開始。
     enum Page: Hashable {
         case displaySwap
-        case taskMode
         case menuBarAccounts
         case about
     }
