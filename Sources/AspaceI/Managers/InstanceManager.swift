@@ -79,6 +79,36 @@ final class InstanceManager {
         instance.id == Self.defaultID(for: instance.platform)
     }
 
+    /// 給 `AccountManager` 偵測各實例登入的帳號。Codex 預設實例（`~/.codex`）由本機匯入處理，不列在這裡；
+    /// Antigravity 整台 Mac 只有一份登入，也不列。
+    func credentialSources() -> [InstanceCredentialSource] {
+        groups.flatMap { group -> [InstanceCredentialSource] in
+            switch group.platform {
+            case .claude:
+                group.all.compactMap { instance in
+                    service.claudeDataDirectory(for: instance, isDefault: isDefault(instance)).map {
+                        InstanceCredentialSource(platform: .claude, instanceName: instance.name, directory: $0)
+                    }
+                }
+            case .codex:
+                group.instances.map {
+                    InstanceCredentialSource(platform: .codex, instanceName: $0.name, directory: URL(fileURLWithPath: $0.profileDirectory))
+                }
+            case .antigravity:
+                []
+            }
+        }
+    }
+
+    /// 實例資料夾裡已經是這個帳號的登入就不覆寫：實例換新過的 token 比 AspaceI 手上的副本新，蓋回舊的會讓它被登出。
+    nonisolated static func needsProjection(of account: Account, into profile: URL) -> Bool {
+        guard account.platform == .codex, let email = account.email else { return true }
+        let url = profile.appending(path: "auth.json")
+        guard FileManager.default.fileExists(atPath: url.path), let data = try? Data(contentsOf: url),
+              let fileEmail = AccountManager.credentialEmail(data, platform: .codex) else { return true }
+        return fileEmail.caseInsensitiveCompare(email) != .orderedSame
+    }
+
     func add(name: String, platform: PlatformKind, accountID: UUID?) {
         do {
             let id = UUID()
@@ -201,8 +231,11 @@ final class InstanceManager {
                instance.platform.supportsAccountBinding(isDefault: false),
                let accountID = instance.accountID,
                let account = accounts.accounts.first(where: { $0.id == accountID }) {
-                let data = try accounts.credentialData(for: accountID)
-                try CredentialProjectionService.shared.project(account: account, credentialData: data, to: URL(fileURLWithPath: instance.profileDirectory))
+                let profile = URL(fileURLWithPath: instance.profileDirectory)
+                if Self.needsProjection(of: account, into: profile) {
+                    let data = try accounts.credentialData(for: accountID)
+                    try CredentialProjectionService.shared.project(account: account, credentialData: data, to: profile)
+                }
             }
             var appPath = instance.executablePath
             var cloneError: Error?

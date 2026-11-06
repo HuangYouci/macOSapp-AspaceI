@@ -8,6 +8,13 @@ final class AccountManager {
 
     private static let defaultClientKey = "defaultClientAccountIDs"
     private static let dismissedLocalKey = "dismissedLocalPlatforms"
+    private static let dismissedInstanceKey = "dismissedInstanceAccounts"
+
+    /// 實例登入的帳號用哪份憑證查額度。`expired`：實例有登入，但手上的 token 已過期。
+    enum InstanceBacking: Equatable, Sendable {
+        case usable(Data)
+        case expired
+    }
 
     private(set) var accounts: [Account] = []
     private(set) var isRefreshing = false
@@ -18,8 +25,13 @@ final class AccountManager {
     @ObservationIgnored private var didAutoImport = false
     @ObservationIgnored private var quotaRefreshInFlight = false
     @ObservationIgnored private var quotaRefreshPending = false
+    /// 每輪從實例資料夾重算；不存檔、不寫進 Keychain。
+    @ObservationIgnored private var instanceBacking: [UUID: InstanceBacking] = [:]
+    /// 各實例存放登入的資料夾，App 啟動時接上 `InstanceManager`。
+    @ObservationIgnored var instanceSourcesProvider: (@MainActor () -> [InstanceCredentialSource])?
 
     private let accountStore: AccountStore
+    private let instanceDetector = InstanceAccountDetector()
     private let importService = CredentialImportService.shared
     private let keychainService = KeychainService.shared
     private let quotaService = QuotaService.shared
@@ -97,6 +109,10 @@ final class AccountManager {
                 !platforms.contains { $0.rawValue == raw }
             }
             defaults.set(remaining, forKey: Self.dismissedLocalKey)
+            let remainingInstances = (defaults.stringArray(forKey: Self.dismissedInstanceKey) ?? []).filter { key in
+                !platforms.contains { key.hasPrefix("\($0.rawValue):") }
+            }
+            defaults.set(remainingInstances, forKey: Self.dismissedInstanceKey)
         }
         isRefreshing = true
         defer { isRefreshing = false }
@@ -331,6 +347,12 @@ final class AccountManager {
             }
         }
         accounts.removeAll { $0.id == account.id }
+        // 實例還登入著，不記下來的話下一輪又會自動加回來；按「讀取這台 Mac」才重新加入。
+        if account.origin == .instance || instanceBacking[account.id] != nil, let key = Self.identityKey(for: account) {
+            let dismissed = Set(defaults.stringArray(forKey: Self.dismissedInstanceKey) ?? []).union([key])
+            defaults.set(Array(dismissed).sorted(), forKey: Self.dismissedInstanceKey)
+        }
+        instanceBacking[account.id] = nil
         if account.origin == .local {
             let dismissed = Set(defaults.stringArray(forKey: Self.dismissedLocalKey) ?? []).union([account.platform.rawValue])
             defaults.set(Array(dismissed).sorted(), forKey: Self.dismissedLocalKey)
@@ -352,7 +374,9 @@ final class AccountManager {
     }
 
     /// 同一時間只跑一輪；Codex／Claude 的 refresh token 用過即失效，兩輪同時換發會把帳號弄壞。
-    func refreshAllQuotas() async {
+    /// `retryingDeniedAccess`：使用者手動按更新時，重問先前沒拿到的鑰匙圈授權。
+    func refreshAllQuotas(retryingDeniedAccess: Bool = false) async {
+        if retryingDeniedAccess { instanceDetector.allowRetry() }
         guard !quotaRefreshInFlight else {
             quotaRefreshPending = true
             return
@@ -369,6 +393,7 @@ final class AccountManager {
             // 後面每輪都成功也不會消失。
             errorMessage = nil
             await syncLocalCredentials()
+            await syncInstanceAccounts()
             await refreshQuotasOnce()
         } while quotaRefreshPending && !Task.isCancelled
     }
@@ -386,6 +411,74 @@ final class AccountManager {
                 let stored = try keychainService.load(account: reference)
                 guard stored != data, Self.localFile(data, belongsTo: account, credential: stored) else { continue }
                 try keychainService.save(data, account: reference)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// 實例登入的帳號一律用實例的登入查額度：同一個帳號在兩處各自換新，伺服器會在幾小時後作廢其中一份
+    /// （畫面上就是「授權碼無效或已過期」）。沒在清單上的帳號自動加入，使用者移除過的不加回。
+    private func syncInstanceAccounts() async {
+        let sources = instanceSourcesProvider?() ?? []
+        let result = await Task.detached(priority: .utility) { [instanceDetector] in
+            instanceDetector.detect(sources)
+        }.value
+        guard !Task.isCancelled else { return }
+        if let message = result.errors.first { errorMessage = message }
+        let dismissed = Set(defaults.stringArray(forKey: Self.dismissedInstanceKey) ?? [])
+        let reconciled = Self.reconcileInstanceAccounts(accounts, detected: result.accounts, dismissed: dismissed)
+        instanceBacking = reconciled.backing
+        if reconciled.accounts != accounts {
+            accounts = reconciled.accounts
+            persistAccounts()
+        }
+        syncInstanceCredentialsToKeychain()
+    }
+
+    nonisolated static func reconcileInstanceAccounts(
+        _ accounts: [Account],
+        detected: [DetectedInstanceAccount],
+        dismissed: Set<String>
+    ) -> (accounts: [Account], backing: [UUID: InstanceBacking]) {
+        var result = accounts
+        var backing: [UUID: InstanceBacking] = [:]
+        for item in detected {
+            guard let key = item.identityKey else { continue }
+            let id: UUID
+            if let existing = result.first(where: { identityKey(for: $0) == key }) {
+                id = existing.id
+            } else {
+                guard !dismissed.contains(key) else { continue }
+                let account = Account(
+                    platform: item.platform,
+                    displayName: item.email ?? item.instanceName,
+                    email: item.email,
+                    accountUUID: item.accountUUID?.lowercased(),
+                    sourcePath: item.instanceName,
+                    isActive: !result.contains { $0.platform == item.platform && $0.isActive },
+                    origin: .instance
+                )
+                result.append(account)
+                id = account.id
+            }
+            backing[id] = item.credential.map(InstanceBacking.usable) ?? .expired
+        }
+        return (result, backing)
+    }
+
+    nonisolated static func identityKey(for account: Account) -> String? {
+        DetectedInstanceAccount.identityKey(platform: account.platform, accountUUID: account.accountUUID, email: account.email)
+    }
+
+    /// Codex 實例換新後，把最新的 auth.json 寫回 Keychain 裡的副本，之後綁定或切換才不會拿到已作廢的舊 token。
+    private func syncInstanceCredentialsToKeychain() {
+        for account in accounts where account.platform == .codex {
+            guard case .usable(let data) = instanceBacking[account.id], let reference = account.credentialReference else { continue }
+            do {
+                if try keychainService.load(account: reference) != data {
+                    try keychainService.save(data, account: reference)
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -412,7 +505,7 @@ final class AccountManager {
     }
 
     /// 憑證裡的登入身分：Codex 與 Antigravity 都帶 id_token，Claude 的憑證看不出身分。
-    static func credentialEmail(_ data: Data, platform: PlatformKind) -> String? {
+    nonisolated static func credentialEmail(_ data: Data, platform: PlatformKind) -> String? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         let idToken: String?
         switch platform {
@@ -440,11 +533,7 @@ final class AccountManager {
         for account in accounts {
             guard !Task.isCancelled else { return }
             do {
-                guard let reference = account.credentialReference,
-                      let data = try keychainService.load(account: reference) else {
-                    throw QuotaError.missingToken
-                }
-                let snapshot = try await fetchQuota(for: account, data: data, reference: reference)
+                let snapshot = try await quotaSnapshot(for: account)
                 guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { continue }
                 accounts[index].quota = snapshot
                 if let identity = snapshot.identity { accounts[index].email = identity }
@@ -460,6 +549,27 @@ final class AccountManager {
             }
         }
         persistAccounts()
+    }
+
+    /// 實例登入著的帳號只用實例的 token，過期也不自己換新（換了會讓實例被登出）；其他帳號走 Keychain 裡的憑證。
+    private func quotaSnapshot(for account: Account) async throws -> QuotaSnapshot {
+        switch instanceBacking[account.id] {
+        case .usable(let credential):
+            do {
+                return try await quotaService.fetch(for: account, credentialData: credential)
+            } catch QuotaError.tokenExpired {
+                throw QuotaError.instanceTokenExpired
+            }
+        case .expired:
+            throw QuotaError.instanceTokenExpired
+        case nil:
+            guard account.origin != .instance else { throw QuotaError.instanceSignedOut }
+            guard let reference = account.credentialReference,
+                  let data = try keychainService.load(account: reference) else {
+                throw QuotaError.missingToken
+            }
+            return try await fetchQuota(for: account, data: data, reference: reference)
+        }
     }
 
     /// 正在官方 App 裡使用的帳號由官方 App 換新 token，AspaceI 再換會讓官方 App 被登出；其他帳號才由 AspaceI 換新。

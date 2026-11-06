@@ -307,8 +307,11 @@ final class QuotaService: Sendable {
 
 enum QuotaError: LocalizedError {
     case missingToken, invalidResponse, invalidEndpoint, tokenExpired, tokenCannotReadUsage, requestFailed(Int)
+    case instanceSignedOut, instanceTokenExpired
     var errorDescription: String? {
         switch self {
+        case .instanceSignedOut: "實例未登入"
+        case .instanceTokenExpired: "實例登入已過期"
         case .missingToken: "找不到可用的登入憑證"
         case .invalidResponse: "額度回應格式無法識別"
         case .invalidEndpoint: "額度服務網址無效"
