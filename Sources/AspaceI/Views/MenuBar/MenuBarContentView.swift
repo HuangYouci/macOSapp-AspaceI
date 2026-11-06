@@ -130,7 +130,7 @@ struct MenuBarContentView: View {
             // 一輪要跑完所有帳號約數秒，期間按鈕是停用的。沒有進行中的訊號時，圖示只是變灰再變回來，
             // 百分比與「更新於」又常常原封不動，按下去看起來就像沒有反應。
             refreshButton(isBusy: accountManager.isRefreshing) {
-                Task { await accountManager.refreshAllQuotas() }
+                Task { await accountManager.refreshAllQuotas(retryingDeniedAccess: true) }
             }
             headerButton("加入帳號", systemImage: "plus") { editor = .account }
         case .usage:

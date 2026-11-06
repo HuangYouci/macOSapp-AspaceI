@@ -55,9 +55,15 @@ struct AspaceIApp: App {
                     Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
                 }
                 .onChange(of: instanceManager.signedInAccountUUIDs) {
-                    Task { await instanceManager.refreshCloneIcons(accounts: accountManager) }
+                    Task {
+                        await instanceManager.refreshCloneIcons(accounts: accountManager)
+                        // 實例換了登入的帳號，不等下一輪五分鐘。
+                        await accountManager.refreshAllQuotas()
+                    }
                 }
                 .task {
+                    let instances = instanceManager
+                    accountManager.instanceSourcesProvider = { instances.credentialSources() }
                     displaySwapManager.start(taskMode: taskModeManager)
                     instanceManager.startMonitoring(accounts: accountManager)
                     taskModeManager.start(instances: instanceManager, accounts: accountManager)

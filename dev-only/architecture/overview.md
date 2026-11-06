@@ -1,8 +1,8 @@
 # AspaceI 架構概覽
 
-最後更新日期：2026-10-29
+最後更新日期：2026-11-06
 
-對應功能／commit：任務管理拿掉快捷鍵與子頁、改在設定主頁選螢幕按開始；螢幕全黑只在按下滑鼠或按鍵時結束；螢幕全黑（設定 > 一般）；任務管理側欄加上重置倒數、忙碌的 App 不再從側欄掉出去；複本有程序在跑時不換掉（Dock 幽靈格）；任務管理跟著螢幕互換換過去；任務管理模式（設定 > 一般）、螢幕互換（設定 > 一般）、設定頁收成二級頁；移除 GitHub Copilot；用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
+對應功能／commit：實例登入自動偵測（Claude 讀桌面版 token 快取、Codex 讀實例 auth.json，實例登入的帳號 AspaceI 不再換新）；任務管理拿掉快捷鍵與子頁、改在設定主頁選螢幕按開始；螢幕全黑只在按下滑鼠或按鍵時結束；螢幕全黑（設定 > 一般）；任務管理側欄加上重置倒數、忙碌的 App 不再從側欄掉出去；複本有程序在跑時不換掉（Dock 幽靈格）；任務管理跟著螢幕互換換過去；任務管理模式（設定 > 一般）、螢幕互換（設定 > 一般）、設定頁收成二級頁；移除 GitHub Copilot；用量分頁（見 `usage-stats/overview.md`）；popup 捲動區貼齊四邊（上下列改為安全區列）、實例執行狀態改在背景更新；menu bar 帳號數量不設上限、額度類型可選（段／週／月／段+週／最少）、帳號或實例變更時重做未執行實例的圖示；Claude 實例（含預設）不顯示自己的 menu bar 圖示；複本受「App 管理」保護改為重新複製而非原地重畫圖示、從 Dock 點複本時叫出已在跑的實例；同平台實例一起更新、三字短名稱撞名規則（menu bar 與實例圖示共用）；非預設實例改用 App 複本（Dock 圖示右下角標短名稱）；多開與 App 自動更新衝突（更新並重開、預設實例改用 `open -n`）；Claude 實例自動辨識登入帳號、實例刪除入口修正（列尾選單、整列右鍵、二次確認）；Antigravity 切換改寫登入 Keychain、寫入驗證與空殼憑證防線、Gemini 額度群組與 5h 時窗修正、同 email 帳號合併
 
 ## 移除 GitHub Copilot（2026-10-12 決策）
 
@@ -97,7 +97,8 @@ tier id 存在 `Account.tierID`，每輪從 `loadCodeAssist` 更新——它同�
 ### Token 保活
 
 - 本機匯入的帳號：每輪先從官方客戶端的檔案重新讀取憑證（只讀檔案），內容變了才寫回 Keychain；由官方客戶端負責換新。寫回前先確認檔案屬於該帳號（`AccountManager.localFile`）：能從 id_token 取得身分就比對身分，取不到就比對 refresh token（Google 的不輪替），兩者都判斷不出來時只信任 `origin == .local` 的帳號。少了這道判斷，使用者在官方 App 裡換回別的帳號後，AspaceI 會把官方 App 的憑證蓋到切換進來的帳號上，畫面看起來就像「切換沒有生效」。
-- AspaceI 自己登入或從檔案匯入的帳號：Claude 在 `expiresAt` 前一分鐘換新；Codex 在 `last_refresh` 超過 7 天（或沒有紀錄）時換新；兩者遇到 401/403 也會換新重試。Antigravity 每次都用 refresh token 換 access token。
+- 實例登入著的帳號：只用實例的 token，AspaceI 不換新（見下方「實例登入自動偵測」）。
+- 其餘 AspaceI 自己登入或從檔案匯入的帳號：Claude 在 `expiresAt` 前一分鐘換新；Codex 在 `last_refresh` 超過 7 天（或沒有紀錄）時換新；兩者遇到 401/403 也會換新重試。Antigravity 每次都用 refresh token 換 access token。
 - 只在 App 執行時運作，需要常駐請開「登入時開啟」。
 
 ### 方案
@@ -145,7 +146,21 @@ OAuth 取得的憑證寫成各官方客戶端的原生格式（Codex `auth.json`
 
 ### Token 輪替
 
-Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` 的帳號才會在額度請求回 401/403（Claude 另在 `expiresAt` 前一分鐘）時換發並寫回 Keychain；本機匯入的憑證屬於官方客戶端，AspaceI 換發會讓官方客戶端被登出。
+Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local`、而且沒有實例登入著的帳號，才會在額度請求回 401/403（Claude 另在 `expiresAt` 前一分鐘）時換發並寫回 Keychain；本機匯入的憑證屬於官方客戶端，AspaceI 換發會讓官方客戶端被登出。
+
+### 實例登入自動偵測（2026-11-06）
+
+**為什麼**：Claude 帳號常出現「授權碼無效或已過期」，重登一個又換另一個壞。查證（2026-11-06）：AspaceI 自己的換發鏈是連續的——claude-max-1 前一晚換發成功、05:21 還查得到、05:26 到期換發被伺服器回 400，中間 AspaceI 沒碰過那把 refresh token；同時段其他帳號每 8 小時換發都成功。每個 Claude 帳號都登入在一個桌面 App 實例，而桌面 App 的 Code 分頁用跟 AspaceI 同一個 Claude Code client ID（`9d1c250a…`）替同帳號拿 token。外部回報（anthropics/claude-code issue 80292）同帳號另一處登入後，這邊的 refresh token 會在幾小時後換發時才失效。Anthropic 未正式說明，屬推論；但只要 AspaceI 不自己持有這種帳號的登入，就不會再踩到。
+
+**做法**：每輪額度更新開頭（`AccountManager.syncInstanceAccounts`），從 `InstanceManager.credentialSources()` 取得各實例資料夾，在背景執行緒由 `InstanceAccountDetector` 讀出各實例登入的帳號：
+
+- Claude（預設與所有實例）：`config.json` 的 `lastKnownAccountUuid` 決定是誰；`oauth:tokenCacheV2`／`oauth:tokenCache` 是 Electron safeStorage 加密（base64(`v10` + AES-128-CBC)，IV 16 個空白，鑰匙 = PBKDF2-SHA1(鑰匙圈 `Claude Safe Storage`／`Claude Key`, `saltysalt`, 1003, 16)）。所有複本的 App 名稱都是 Claude，共用同一把鑰匙，第一次讀時跳一次授權視窗（要按「永遠允許」；App 以 Apple Development 憑證簽章，重建後不必重按）。被拒時不自動重問（否則每五分鐘跳一次），按額度分頁的更新鈕才再問：2026-11-06 實測電腦閒置約 10 分鐘時，securityd 顯示視窗後 2 毫秒就判為未允許，使用者根本沒看到。挑同帳號、scope 含 `user:profile`、還沒過期的 token 中最晚到期的一筆（`ClaudeDesktopCredentialService.selectToken`）。**只用 access token**，快取裡的 refresh token 絕不使用，換新交給桌面 App。2026-11-06 實測：claude-max-1 在 AspaceI 的登入已失效時，實例快取的 token 查 `api/oauth/usage`、`api/oauth/profile` 都回 200；只有 `user:inference` 的那幾筆回 403。
+- Codex（非預設實例）：實例的 `CODEX_HOME/auth.json`，以 id_token 的 email 辨識。預設實例（`~/.codex`）仍走本機匯入。實例換新後，把最新的 auth.json 寫回 Keychain 裡的副本；實例啟動時資料夾裡已經是綁定帳號的登入就不覆寫（`InstanceManager.needsProjection`），否則會拿 AspaceI 手上較舊的副本蓋掉實例換新過的 token。
+- Antigravity：不偵測。2.0 起登入在系統鑰匙圈的同一個位置，整台 Mac 只有一份，由本機匯入處理；Google 的 refresh token 不輪替，AspaceI 自己保管也不會互搶。
+
+對應規則（`AccountManager.reconcileInstanceAccounts`，有測試）：Claude 以 `accountUUID`、Codex 以 email（不分大小寫）對到既有帳號；對到就改用實例的登入查額度（不改 `origin`，實例登出後退回 Keychain 裡那份），對不到就新增 `origin == .instance` 的帳號（不存憑證）。使用者移除過的偵測帳號記在 UserDefaults `dismissedInstanceAccounts`，按「讀取這台 Mac」才清掉。實例有登入但 token 過期時顯示「實例登入已過期」、`.instance` 帳號的實例登出時顯示「實例未登入」，兩種都不退回 AspaceI 自己換新。實例換了登入帳號（`signedInAccountUUIDs` 變動）時立刻跑一輪。
+
+桌面 App 的 `plan-usage-history.json` 只在開過它的額度面板 24 小時內更新，不能當資料來源。
 
 ### 匯入／匯出
 
@@ -172,7 +187,7 @@ Codex 與 Claude 的 refresh token 會輪替。只有 `origin` 不是 `.local` �
   - `open` 會把呼叫端的環境變數轉交給 App，啟動時濾掉 `DYLD_*`。
 - `ps` 一律在背景執行（`InstanceManager.processList`），`refreshRunning`／`refreshCloneIcons` 為 async：程序多的機器上 `ps -axww` 要 0.5 到 3.5 秒（2026-10-12 實測 4800 個程序），原本在主執行緒同步跑，切到實例分頁整個 popup 會卡住。同一時間只跑一輪，期間再被呼叫就排到這輪之後；啟動時先抓一輪，第一次打開實例分頁狀態就是對的。
 - 執行狀態以 `ps` 比對主執行檔：`.app/Contents/MacOS/` 之前的路徑不能再有 `/Contents/`（排除 Frameworks 裡的 Helper）也不能有引號（排除 VS Code 讀 shell 環境的 `/bin/zsh -c '…/Code'`）。預設實例是原本 App 名稱（只比對名稱，因為隔離中的 App 會從 AppTranslocation 暫存路徑執行）、沒有 `--user-data-dir`、不在複本資料夾的那個；其他實例不看 App 名稱（複本檔名會變），只比對資料夾（等號與空格兩種寫法都認）。停止送 SIGTERM。
-- 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 的登入存在加密的儲存區，不提供綁定，實例內自行登入一次。
+- 帳號綁定只在 AspaceI 能把憑證放到 App 讀得到的位置時提供：Codex（預設與獨立實例，寫入 `auth.json`）、Antigravity 預設實例（寫入官方 token 檔）。Claude Desktop 的登入存在加密的儲存區，不提供綁定，實例內自行登入一次；登入後 AspaceI 會自動偵測並用它查額度（見「實例登入自動偵測」）。
 - Claude 實例（含預設）改為**自動辨識**目前登入的帳號，列上只顯示、不提供選單：讀該實例資料夾 `config.json` 的 `lastKnownAccountUuid`，同時要有非空的 `oauth:tokenCache*` 才算登入中（`lastKnown` 登出後可能殘留，這一點未實測登出行為），再對到 `Account.accountUUID`（Claude `api/oauth/profile` 的 `account.uuid`，帳號沒有時每輪補抓）。2026-10-08 實測兩者同一套編號：`~/.claude.json` 的 `oauthAccount.accountUuid` 與預設 Claude 相同，兩個實例都對到正確帳號。不能做成像 Codex 的選單：AspaceI 手上是 Claude Code 的 OAuth token，桌面 App 的登入是 claude.ai cookie 與 safeStorage 加密的 token 快取，寫不進去。登入狀態在打開實例分頁與按更新時重讀。
 - Claude 實例（含預設）不放自己的 menu bar 圖示：每個實例各放一個，多開時擠滿 menu bar。啟動前把該實例 `claude_desktop_config.json` 的 `preferences.menuBarEnabled` 設為 false（Claude 設定頁的同一個開關，關掉時 App 不建立 `Tray`），其他欄位原樣保留，格式不對就不寫、照常啟動。只能在實例沒執行時寫：Claude 啟動時把設定讀進記憶體，之後以記憶體的版本整份寫回，執行中改檔案會被蓋掉。所以已在執行的實例要經 AspaceI 重開一次才生效；預設實例被 ShipIt 或 Dock 直接打開時沿用檔案裡已寫入的值。2026-10-10 實測：AspaceI 開啟的測試實例沒有 status item，Claude 啟動與結束寫回後值仍為 false。
 - `instances.json` 為 `{instances, defaultAccountIDs}`，仍可讀舊版只有陣列的格式。

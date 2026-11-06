@@ -2,7 +2,8 @@ import Foundation
 
 struct Account: Codable, Identifiable, Equatable, Sendable {
     enum Origin: String, Codable, Sendable {
-        case local, manual, file, oauth
+        /// `instance`：從實例資料夾自動偵測到的帳號，AspaceI 不保存它的憑證。
+        case local, manual, file, oauth, instance
     }
 
     let id: UUID

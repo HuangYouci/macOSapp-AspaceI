@@ -205,7 +205,7 @@ final class InstanceService: Sendable {
     }
 
     /// 預設實例是官方 App 自己的資料夾。
-    private func claudeDataDirectory(for instance: Instance, isDefault: Bool) -> URL? {
+    func claudeDataDirectory(for instance: Instance, isDefault: Bool) -> URL? {
         guard isDefault else { return URL(fileURLWithPath: instance.profileDirectory) }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appending(path: "Claude", directoryHint: .isDirectory)
