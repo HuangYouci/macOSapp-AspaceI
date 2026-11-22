@@ -57,6 +57,12 @@ enum AXWindow {
         AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
     }
 
+    /// 最小化的視窗要先還原，拉到最前面才看得到。
+    static func unminimize(_ window: AXUIElement) {
+        guard (attribute(window, kAXMinimizedAttribute) as? Bool) == true else { return }
+        AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+    }
+
     static func title(of window: AXUIElement) -> String {
         attribute(window, kAXTitleAttribute) as? String ?? ""
     }

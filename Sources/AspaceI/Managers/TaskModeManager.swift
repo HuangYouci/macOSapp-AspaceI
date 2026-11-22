@@ -179,6 +179,13 @@ final class TaskModeManager {
         let pid = window.pid
         let service = windowService
         Task.detached {
+            await MainActor.run {
+                // 被 ⌘H 隱藏的 App 要先取消隱藏，視窗才拉得出來。
+                let app = NSRunningApplication(processIdentifier: pid)
+                if app?.isHidden == true {
+                    _ = app?.unhide()
+                }
+            }
             service.raise(box.element)
             await MainActor.run {
                 _ = NSRunningApplication(processIdentifier: pid)?.activate()
@@ -246,7 +253,16 @@ final class TaskModeManager {
         let service = windowService
         let previous = windows
         let previousElements = TaskElements(elements: elements)
-        let scan = await Task.detached { service.scan(pids: pids).carryingOver(previous, elements: previousElements.elements) }.value
+        let scan = await Task.detached {
+            let fresh = service.scan(pids: pids)
+            let candidates = previous.compactMap { window -> (id: CGWindowID, pid: pid_t, element: AXUIElement)? in
+                guard fresh.elements[window.id] == nil, fresh.listed[window.id] == nil,
+                      let element = previousElements.elements[window.id] else { return nil }
+                return (window.id, window.pid, element)
+            }
+            let parked = service.parked(candidates, pids: pids)
+            return fresh.carryingOver(previous, elements: previousElements.elements, parked: parked)
+        }.value
         guard isActive else { return }
 
         let known = Set(elements.keys)
@@ -284,7 +300,8 @@ final class TaskModeManager {
 
         // 視窗清單由前到後排，第一個就是使用者現在看的那個，不論是點側欄還是自己點視窗切過去的。
         // 剛點過側欄時，疊放順序還沒跟上就維持點的那個；跟上了或過了時限才交還給清單。
-        let resolved = Self.resolveSelection(front: windows.first?.id, pending: pendingSelection, now: .now, current: current)
+        let front = windows.first(where: { !$0.isParked })?.id ?? windows.first?.id
+        let resolved = Self.resolveSelection(front: front, pending: pendingSelection, now: .now, current: current)
         if !resolved.keepsPending {
             pendingSelection = nil
         }
@@ -297,7 +314,9 @@ final class TaskModeManager {
             sidebarItems = items
         }
         if canCaptureScreen {
-            await capturer?.update(windowIDs: current, pixelWidth: Int(Self.thumbnailPointWidth * display.scale))
+            // 看不到的視窗截不到新畫面，停掉串流、留著最後一張縮圖。
+            let visible = Set(windows.filter { !$0.isParked }.map(\.id))
+            await capturer?.update(windowIDs: visible, pixelWidth: Int(Self.thumbnailPointWidth * display.scale))
         }
     }
 
@@ -378,7 +397,8 @@ final class TaskModeManager {
                 platform: instance.platform,
                 name: name,
                 quota: Self.quota(account),
-                title: window.title
+                title: window.title,
+                isParked: window.isParked
             )
         }
         .sorted {

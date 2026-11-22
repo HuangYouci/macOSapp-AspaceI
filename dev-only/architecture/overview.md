@@ -34,6 +34,8 @@
 
 選一個螢幕，左邊窄側欄（最寬 220pt、最多佔可用寬度兩成）列出所有正在跑的 Claude／Codex／Antigravity 視窗，每列是即時縮圖、名稱（帳號短名，沒帳號用實例名）、額度；右邊工作區放選中的視窗。入口在設定主頁「一般」：選螢幕（只有一個螢幕時不顯示）、按開始／結束；缺權限時同一區多出允許列。2026-10-29 負責人決定拿掉快捷鍵與子頁，舊版存的 `taskModeShortcut` 在啟動時清掉。
 
+2026-11-22：視窗被隱藏、最小化、全螢幕或在別的桌面時不再從側欄掉出去，改標「已隱藏」排在最後、縮圖停在最後一張，點了會取消隱藏並叫回來；只有視窗真的關掉（Accessibility 物件無效）或程序結束才拿掉。側欄面板加入所有桌面空間、可疊在全螢幕上、AspaceI 被隱藏時不跟著藏。
+
 - 分工：`TaskModeManager`（開關、定時更新、選取、還原）→ `TaskWindowService`（掃描與搬動）；版面 `TaskModeLayout`（純函式、有測試）；側欄 `TaskSidebarView`（純展示）由 `TaskSidebarHost` 接上管理器，放在 `TaskSidebarPanel`（不搶焦點的浮動面板）；縮圖 `WindowThumbnailCapturer`。
 - 哪些視窗屬於 AI 工具：用 `InstanceManager.runningProcessIDs`（含預設實例）。它靠 `ps` 判定、要 0.5 到 3 秒，只在開啟時、以及有 App 開啟或結束時重抓。帳號用 `InstanceManager.currentAccount`。
 - 沒選中的視窗疊在工作區後面（負責人選的，不最小化：切換是瞬間的、Dock 不會塞滿）。切換＝把視窗拉到最前並叫起它的 App。
