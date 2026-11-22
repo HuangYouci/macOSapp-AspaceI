@@ -7,6 +7,8 @@ struct TaskWindow: Identifiable, Hashable, Sendable {
     let pid: pid_t
     var title: String
     var frame: CGRect
+    /// 視窗還開著，但被隱藏、最小化或在別的桌面空間，目前看不到。側欄照樣列，點了再叫回來。
+    var isParked = false
 }
 
 /// 一輪掃描的結果。Accessibility 物件建立後不再修改，跨執行緒傳遞是安全的。
@@ -21,17 +23,26 @@ struct TaskWindowScan: @unchecked Sendable {
     /// 上一輪有、這一輪 Accessibility 沒讀到，但視窗伺服器還列著的視窗沿用上一輪的（外框用視窗伺服器的）。
     /// App 在忙（例如正在大量輸出）時 Accessibility 會逾時；直接當成視窗不見了，它會從側欄掉出去、
     /// 縮圖串流被關掉，下一輪讀到時又被當成新視窗搬回工作區，還會把「結束時要還原的位置」記成工作區。
-    /// 最小化、全螢幕、換到別的桌面空間的視窗視窗伺服器不會列，照樣會被拿掉。
-    func carryingOver(_ previous: [TaskWindow], elements previousElements: [CGWindowID: AXUIElement]) -> TaskWindowScan {
+    /// 視窗伺服器沒列、但還開著的（`parked`：隱藏、最小化、全螢幕、在別的桌面空間）也留著並標成看不到，排在最後；
+    /// 不然使用者按一下 ⌘H 或切個桌面，那格就從側欄消失、找不回來。真的關掉的才拿掉。
+    func carryingOver(_ previous: [TaskWindow], elements previousElements: [CGWindowID: AXUIElement], parked: Set<CGWindowID> = []) -> TaskWindowScan {
         var merged = self
         var orders = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, listed[$0.id]?.order ?? Int.max) })
         for window in previous where merged.elements[window.id] == nil {
-            guard let entry = listed[window.id], let element = previousElements[window.id] else { continue }
+            guard let element = previousElements[window.id] else { continue }
             var kept = window
-            kept.frame = entry.frame
+            if let entry = listed[window.id] {
+                kept.frame = entry.frame
+                kept.isParked = false
+                orders[window.id] = entry.order
+            } else if parked.contains(window.id) {
+                kept.isParked = true
+                orders[window.id] = Int.max
+            } else {
+                continue
+            }
             merged.windows.append(kept)
             merged.elements[window.id] = element
-            orders[window.id] = entry.order
         }
         merged.windows.sort { (orders[$0.id] ?? Int.max) < (orders[$1.id] ?? Int.max) }
         return merged
@@ -117,7 +128,23 @@ final class TaskWindowService: Sendable {
 
     func raise(_ element: AXUIElement) {
         AXUIElementSetMessagingTimeout(element, Self.actionTimeout)
+        AXWindow.unminimize(element)
         AXWindow.raise(element)
+    }
+
+    /// 上一輪有、這一輪看不到的視窗裡，程序還在而且視窗物件還有效的（只是被藏起來）。
+    /// App 忙到逾時也算還開著：只有系統明確說物件無效時才當成關掉了。
+    func parked(_ candidates: [(id: CGWindowID, pid: pid_t, element: AXUIElement)], pids: Set<pid_t>) -> Set<CGWindowID> {
+        var result: Set<CGWindowID> = []
+        for candidate in candidates where pids.contains(candidate.pid) {
+            AXUIElementSetMessagingTimeout(candidate.element, Self.messagingTimeout)
+            var value: CFTypeRef?
+            let error = AXUIElementCopyAttributeValue(candidate.element, kAXRoleAttribute as CFString, &value)
+            if error != .invalidUIElement {
+                result.insert(candidate.id)
+            }
+        }
+        return result
     }
 
     private static func matches(_ lhs: CGRect, _ rhs: CGRect) -> Bool {

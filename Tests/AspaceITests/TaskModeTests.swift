@@ -78,6 +78,30 @@ struct TaskModeTests {
         #expect(merged.elements[8] == nil)
     }
 
+    @Test("隱藏、最小化或在別的桌面的視窗留在側欄並排在最後，真的關掉的才拿掉")
+    func keepsParkedWindows() {
+        let element = AXUIElementCreateApplication(1)
+        let hidden = TaskWindow(id: 7, pid: 1, title: "hidden", frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let closed = TaskWindow(id: 8, pid: 1, title: "closed", frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let fresh = TaskWindow(id: 9, pid: 2, title: "fresh", frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        var scan = TaskWindowScan()
+        scan.windows = [fresh]
+        scan.elements = [9: element]
+        scan.listed = [9: (order: 0, frame: fresh.frame)]
+
+        let merged = scan.carryingOver([hidden, closed], elements: [7: element, 8: element], parked: [7])
+        #expect(merged.windows.map(\.id) == [9, 7])
+        #expect(merged.windows.last?.isParked == true)
+        #expect(merged.windows.first?.isParked == false)
+        #expect(merged.elements[8] == nil)
+
+        // 叫回來之後視窗伺服器又列出它，就不再標成看不到。
+        var back = TaskWindowScan()
+        back.listed = [7: (order: 0, frame: hidden.frame)]
+        let restored = back.carryingOver(merged.windows, elements: merged.elements)
+        #expect(restored.windows.first?.isParked == false)
+    }
+
     @MainActor
     @Test("點側欄後疊放順序還沒跟上時維持點的那個，跟上、逾時或被關掉才交還")
     func selectionHold() {

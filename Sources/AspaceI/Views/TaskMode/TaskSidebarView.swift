@@ -8,6 +8,7 @@ struct TaskSidebarView: View {
         let name: String
         let quota: [Quota]
         let title: String
+        var isParked = false
     }
 
     struct Quota: Equatable {
@@ -67,6 +68,12 @@ struct TaskSidebarView: View {
                     Text(item.name)
                         .font(.scaled(.caption, weight: .semibold))
                         .lineLimit(1)
+                    if item.isParked {
+                        Spacer(minLength: 4)
+                        Text("已隱藏")
+                            .font(.scaled(.caption2))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 // 只有這一段每秒重畫，縮圖與選取框不受影響。
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -109,6 +116,7 @@ struct TaskSidebarView: View {
         ZStack {
             Color.black.opacity(0.08)
             Preview(platform: item.platform) { thumbnail(item.id) }
+                .opacity(item.isParked ? 0.45 : 1)
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(16 / 10, contentMode: .fit)

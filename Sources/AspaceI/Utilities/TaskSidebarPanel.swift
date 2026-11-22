@@ -21,7 +21,10 @@ final class TaskSidebarPanel {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.fullScreenNone, .ignoresCycle]
+        // 跟著每個桌面空間、也能疊在全螢幕的 App 上；切桌面、Mission Control、AI 視窗全螢幕時側欄都留著。
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // AspaceI 被 ⌘H 或「隱藏其他」時側欄不跟著藏。
+        panel.canHide = false
 
         let background = NSVisualEffectView(frame: CGRect(origin: .zero, size: cocoaFrame.size))
         background.material = .sidebar
